@@ -22,4 +22,3 @@ READ_SOURCE = {"type": "string", "enum": ["auto", "chain", "indexer"]}
 
 ROLE = {"type": "string", "description": "Role entity reference address"}
 TARGET_WALLET = {"type": "string", "description": "Target address for another entity or wallet"}
-WALLET_ID = {"type": "string", "description": "Hosted registration wallet id"}

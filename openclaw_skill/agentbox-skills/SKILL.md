@@ -55,9 +55,9 @@ At the user layer, the interaction should look like:
 - `agentbox.signer.read`
   - Description: read the current local signer state.
 - `agentbox.registration.prepare`
-  - Description: create a local hosted registration wallet.
+  - Description: prepare direct registration with the active signer.
 - `agentbox.registration.confirm`
-  - Description: confirm registration wallet funding and continue registration.
+  - Description: confirm active-signer funding and continue registration.
 
 ### State reads
 
@@ -240,14 +240,17 @@ At the user layer, the interaction should look like:
   - Description: trigger mint.
   - Usage conditions: the agent should usually first confirm that there is no more direct token opportunity already available and that enough blocks have passed since the last mint.
 
-## Required config
+## Runtime configuration
 
-- `RPC_URL`
-- `CHAIN_ID`
+This skill uses built-in runtime defaults from `agentbox_core/agentbox_runtime/config.py`.
 
-Recommended:
+Default values include:
 
-- `INDEXER_BASE_URL`
+- `RPC_URL = https://sepolia.base.org`
+- `CHAIN_ID = 84532`
+- `INDEXER_BASE_URL = http://127.0.0.1:8000`
+- local signer store path
+- registration and auto-play balance thresholds
 
 ## Interaction model
 

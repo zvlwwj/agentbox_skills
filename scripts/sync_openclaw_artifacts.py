@@ -27,11 +27,9 @@ CORE_RUNTIME_PATHS = [
 ROOT_ENTRY_FILES = {
     "main.py": CORE_ROOT / "skill_player" / "main.py",
     "manifest.json": CORE_ROOT / "skill_player" / "manifest.json",
-    ".env.example": CORE_ROOT / "skill_player" / ".env.example",
 }
 
 PRESERVED_DATA_CHILDREN = {
-    "custody_wallets",
     "signers",
 }
 
@@ -54,7 +52,7 @@ def _copy_path(src: Path, dst: Path) -> None:
 def _sync_managed_skill_install() -> None:
     OPENCLAW_SKILL_DIR.mkdir(parents=True, exist_ok=True)
     for child in list(OPENCLAW_SKILL_DIR.iterdir()):
-        if child.name in {".env", ".data"}:
+        if child.name == ".data":
             continue
         _remove_path(child)
     shutil.copy2(SKILL_ROOT / "SKILL.md", OPENCLAW_SKILL_DIR / "SKILL.md")
@@ -114,7 +112,7 @@ def main() -> None:
     if not args.keep_data:
         print(
             f"Reset runtime data under {OPENCLAW_SKILL_DIR / '.data'} "
-            "(preserved custody wallets and signer private-key files only)"
+            "(preserved signer private-key files only)"
         )
     else:
         print(f"Preserved runtime data under {OPENCLAW_SKILL_DIR / '.data'}")
