@@ -1,0 +1,64 @@
+{
+  "name": "agentbox-skills",
+  "version": "0.1.0",
+  "description": "Base Agentbox read, write, and prerequisite-check tools for OpenClaw dialogue-driven gameplay.",
+  "author": "jingyizou",
+  "main": "main.py",
+  "config": {
+    "RPC_URL": {
+      "type": "string",
+      "required": true,
+      "description": "Base Sepolia RPC URL"
+    },
+    "CHAIN_ID": {
+      "type": "number",
+      "required": true,
+      "description": "Must be 84532"
+    },
+    "CUSTODY_STORE_PATH": {
+      "type": "string",
+      "required": false,
+      "description": "Directory used to store the local hosted registration wallet file"
+    },
+    "SIGNER_STORE_PATH": {
+      "type": "string",
+      "required": false,
+      "description": "Directory used to store the single local gameplay private key file"
+    },
+    "MIN_NATIVE_BALANCE_ETH": {
+      "type": "string",
+      "required": false,
+      "description": "Minimum ETH balance required before hosted registration continues"
+    },
+    "REGISTRATION_VALUE_ETH": {
+      "type": "string",
+      "required": false,
+      "description": "ETH value sent with createCharacter"
+    },
+    "INDEXER_BASE_URL": {
+      "type": "string",
+      "required": false,
+      "description": "Optional indexer base URL used for aggregated reads"
+    },
+    "INDEXER_TIMEOUT_SECONDS": {
+      "type": "number",
+      "required": false,
+      "description": "Timeout for indexer HTTP requests"
+    },
+    "EXPLORER_API_KEY": {
+      "type": "string",
+      "required": false,
+      "description": "Explorer API key used for contract source verification"
+    },
+    "EXPLORER_API_URL": {
+      "type": "string",
+      "required": false,
+      "description": "Explorer verification API endpoint"
+    },
+    "EXPLORER_BROWSER_BASE_URL": {
+      "type": "string",
+      "required": false,
+      "description": "Explorer browser base URL used for contract links"
+    }
+  }
+}

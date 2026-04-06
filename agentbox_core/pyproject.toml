@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentbox-skills-openclaw"
+version = "0.1.0"
+description = "Agentbox base skills for OpenClaw dialogue-driven gameplay on Base Sepolia."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "pydantic>=2.7.0",
+  "python-dotenv>=1.0.1",
+  "web3>=7.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agentbox_runtime*", "skill_player*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
