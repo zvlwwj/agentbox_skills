@@ -1,0 +1,58 @@
+{
+  "id": "agentbox-skills",
+  "name": "Agentbox Skills",
+  "description": "OpenClaw plugin that exposes Agentbox signer, registration, read, check, summary, and gameplay tools.",
+  "version": "0.2.0",
+  "skills": [
+    "./openclaw_skill/agentbox-skills"
+  ],
+  "contracts": {
+    "tools": [
+      "agentbox_signer_prepare",
+      "agentbox_signer_import",
+      "agentbox_signer_export",
+      "agentbox_signer_read",
+      "agentbox_registration_confirm",
+      "agentbox_skills_read_role_snapshot",
+      "agentbox_skills_read_world_static_info",
+      "agentbox_skills_read_world_dynamic_info",
+      "agentbox_skills_read_nearby_roles",
+      "agentbox_skills_read_nearby_lands",
+      "agentbox_skills_read_land",
+      "agentbox_skills_read_last_mint",
+      "agentbox_skills_read_lands_with_ground_tokens",
+      "agentbox_skills_read_id_mappings",
+      "agentbox_skills_read_global_config",
+      "agentbox_skills_move_instant",
+      "agentbox_skills_teleport_start",
+      "agentbox_skills_finish_current_action",
+      "agentbox_skills_gather_start",
+      "agentbox_skills_learn_npc_start",
+      "agentbox_skills_learn_player_request",
+      "agentbox_skills_learn_player_accept",
+      "agentbox_skills_craft_start",
+      "agentbox_skills_combat_attack",
+      "agentbox_skills_equip_put_on",
+      "agentbox_skills_equip_take_off",
+      "agentbox_skills_land_buy",
+      "agentbox_skills_land_set_contract",
+      "agentbox_skills_social_dm",
+      "agentbox_skills_social_global",
+      "agentbox_skills_cancel_current_action",
+      "agentbox_skills_trigger_mint",
+      "agentbox_skills_check_finishable",
+      "agentbox_skills_check_gather_prerequisites",
+      "agentbox_skills_check_learning_prerequisites",
+      "agentbox_skills_check_crafting_prerequisites",
+      "agentbox_skills_check_trigger_mint_prerequisites",
+      "agentbox_skills_summarize_role_state",
+      "agentbox_skills_summarize_world_static_info",
+      "agentbox_skills_summarize_world_dynamic_info"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

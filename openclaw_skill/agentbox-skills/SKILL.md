@@ -21,20 +21,20 @@ The tools are grouped into reads, checks, and writes.
 
 ### Signer and registration helpers
 
-- `agentbox.signer.prepare`
+- `agentbox_signer_prepare`
   - Description: create the single local gameplay private key.
-- `agentbox.signer.import`
+- `agentbox_signer_import`
   - Description: import the single local gameplay private key.
-- `agentbox.signer.export`
+- `agentbox_signer_export`
   - Description: export the current local gameplay private key.
-- `agentbox.signer.read`
+- `agentbox_signer_read`
   - Description: read the current local signer information.
-- `agentbox.registration.confirm`
+- `agentbox_registration_confirm`
   - Description: check registration with the current local signer, return any required top-up information, recover existing onchain registration state, or create the role if registration can proceed.
 
 ### State reads
 
-- `agentbox.skills.read_role_snapshot`
+- `agentbox_skills_read_role_snapshot`
   - Description: read the full current role snapshot.
   - Main returned fields:
     - `staticInfo.identity`
@@ -55,7 +55,7 @@ The tools are grouped into reads, checks, and writes.
     - `dynamicInfo.role.range`
     - `dynamicInfo.action`
     - `dynamicInfo.finishable.canFinish`
-- `agentbox.skills.read_world_static_info`
+- `agentbox_skills_read_world_static_info`
   - Description: read relatively static world information.
   - Main returned fields:
     - `all_npcs`
@@ -66,7 +66,7 @@ The tools are grouped into reads, checks, and writes.
     - `current_equipment_recipes`
     - `available_land_contracts`
     - `mint_interval_blocks`
-- `agentbox.skills.read_world_dynamic_info`
+- `agentbox_skills_read_world_dynamic_info`
   - Description: read dynamic world information.
   - Main returned fields:
     - `current_block`
@@ -82,7 +82,7 @@ The tools are grouped into reads, checks, and writes.
     - `nearby_lands`
     - `lands_with_ground_tokens`
     - `last_mint`
-- `agentbox.skills.read_nearby_roles`
+- `agentbox_skills_read_nearby_roles`
   - Description: read nearby role information.
   - Main returned fields:
     - `roleId`
@@ -92,7 +92,7 @@ The tools are grouped into reads, checks, and writes.
     - `x`
     - `y`
     - `state`
-- `agentbox.skills.read_nearby_lands`
+- `agentbox_skills_read_nearby_lands`
   - Description: read nearby land information.
   - Main returned fields:
     - `landId`
@@ -105,7 +105,7 @@ The tools are grouped into reads, checks, and writes.
     - `stock`
     - `groundTokens`
     - `updatedAtBlock`
-- `agentbox.skills.read_land`
+- `agentbox_skills_read_land`
   - Description: read detailed information for a specific land.
   - Main returned fields:
     - `landId`
@@ -118,7 +118,7 @@ The tools are grouped into reads, checks, and writes.
     - `stock`
     - `groundTokens`
     - `updatedAtBlock`
-- `agentbox.skills.read_last_mint`
+- `agentbox_skills_read_last_mint`
   - Description: read the latest mint information.
   - Main returned fields:
     - `event_name`
@@ -126,7 +126,7 @@ The tools are grouped into reads, checks, and writes.
     - `block_timestamp`
     - `tx_hash`
     - `decoded_args`
-- `agentbox.skills.read_lands_with_ground_tokens`
+- `agentbox_skills_read_lands_with_ground_tokens`
   - Description: read lands with `ground_tokens`.
   - Main returned fields:
     - `landId`
@@ -139,7 +139,7 @@ The tools are grouped into reads, checks, and writes.
     - `stock`
     - `groundTokens`
     - `updatedAtBlock`
-- `agentbox.skills.read_id_mappings`
+- `agentbox_skills_read_id_mappings`
   - Description: read the Agentbox ID mappings table so the agent can understand what each game ID means.
   - Main returned fields:
     - `skills`
@@ -156,7 +156,7 @@ The tools are grouped into reads, checks, and writes.
     - Use `resources` to know that resource `1` means wood.
     - Use `roleStates` to know that state `0` means `Idle`.
     - Use `equipmentSlots` to know that slot `1` means weapon.
-- `agentbox.skills.read_global_config`
+- `agentbox_skills_read_global_config`
   - Description: read global configuration.
   - Main returned fields:
     - `mapWidth`
@@ -170,24 +170,24 @@ The tools are grouped into reads, checks, and writes.
 
 ### Prerequisite checks
 
-- `agentbox.skills.check_finishable`
+- `agentbox_skills_check_finishable`
   - Description: check whether the current action can be finished.
-- `agentbox.skills.check_gather_prerequisites`
+- `agentbox_skills_check_gather_prerequisites`
   - Description: check gather prerequisites.
-- `agentbox.skills.check_learning_prerequisites`
+- `agentbox_skills_check_learning_prerequisites`
   - Description: check learning prerequisites.
-- `agentbox.skills.check_crafting_prerequisites`
+- `agentbox_skills_check_crafting_prerequisites`
   - Description: check crafting prerequisites.
-- `agentbox.skills.check_trigger_mint_prerequisites`
+- `agentbox_skills_check_trigger_mint_prerequisites`
   - Description: check mint prerequisites.
 
 ### Planning support
 
-- `agentbox.skills.summarize_role_state`
+- `agentbox_skills_summarize_role_state`
   - Description: summarize the current role state.
-- `agentbox.skills.summarize_world_static_info`
+- `agentbox_skills_summarize_world_static_info`
   - Description: summarize world static information.
-- `agentbox.skills.summarize_world_dynamic_info`
+- `agentbox_skills_summarize_world_dynamic_info`
   - Description: summarize world dynamic information.
 
 ### Onchain actions
@@ -197,54 +197,54 @@ These onchain actions share the following common conditions:
 - A local signer must exist.
 - If the role has a `controller`, the signer must be the `controller`. Otherwise, the signer must be the `owner`.
 
-- `agentbox.skills.move.instant`
+- `agentbox_skills_move_instant`
   - Description: move to a target coordinate.
   - Usage conditions: the role must currently be `Idle`; the target coordinate must be explicit; the movement distance must fit within the role's current `speed`.
-- `agentbox.skills.teleport.start`
+- `agentbox_skills_teleport_start`
   - Description: start teleporting.
   - Usage conditions: the role must currently be `Idle`; the teleport target must be explicit; do not start teleport again while already `Teleporting`; after starting, teleport usually requires waiting and later `finish`.
-- `agentbox.skills.finish_current_action`
+- `agentbox_skills_finish_current_action`
   - Description: finish the current action.
   - Usage conditions: `finishable.canFinish` must be true; the current role state must be one of the supported finish states mapped by the skill: `Learning`, `Crafting`, `Gathering`, or `Teleporting`.
-- `agentbox.skills.gather.start`
+- `agentbox_skills_gather_start`
   - Description: start gathering.
   - Usage conditions: the role must currently be `Idle`; the role must already be standing on the current resource land; the current land must be a resource point with stock remaining; the land's `resourceType` must correspond to a learned skill.
-- `agentbox.skills.learn.npc.start`
+- `agentbox_skills_learn_npc_start`
   - Description: start learning from an NPC.
   - Usage conditions: the role must currently be `Idle`; the role must be at the NPC's exact coordinate; the NPC must exist and provide the target skill; the target skill must not already be learned.
-- `agentbox.skills.learn.player.request`
+- `agentbox_skills_learn_player_request`
   - Description: send a player-learning request.
   - Usage conditions: the role must currently be `Idle`; the target teacher wallet must exist; player-to-player teaching position and teaching-state requirements must be satisfied onchain.
-- `agentbox.skills.learn.player.accept`
+- `agentbox_skills_learn_player_accept`
   - Description: accept a player-learning interaction.
   - Usage conditions: the role must currently be `Idle`; the student wallet must exist; there must be a pending teaching interaction that can be accepted onchain.
-- `agentbox.skills.craft.start`
+- `agentbox_skills_craft_start`
   - Description: start crafting.
   - Usage conditions: the role must currently be `Idle`; the recipe must exist; the required skill must already be learned; all required resources must already be available in sufficient amounts.
-- `agentbox.skills.combat.attack`
+- `agentbox_skills_combat_attack`
   - Description: attack a target role.
   - Usage conditions: the role must currently be `Idle`; the target wallet must exist; attack range and other combat prerequisites must be satisfied onchain.
-- `agentbox.skills.equip.put_on`
+- `agentbox_skills_equip_put_on`
   - Description: equip an item.
   - Usage conditions: the role must currently be `Idle`; the target equipment must exist, be owned by the role, and be wearable in its slot.
-- `agentbox.skills.equip.take_off`
+- `agentbox_skills_equip_take_off`
   - Description: unequip an item.
   - Usage conditions: the role must currently be `Idle`; the specified equipment slot must currently contain an equipped item.
-- `agentbox.skills.land.buy`
+- `agentbox_skills_land_buy`
   - Description: buy a land.
   - Usage conditions: the role must already be standing on the target land coordinate; the land must be purchasable and the signer must satisfy the required payment condition.
-- `agentbox.skills.land.set_contract`
+- `agentbox_skills_land_set_contract`
   - Description: set a land contract.
   - Usage conditions: the role must already be standing on the target land coordinate; the role must have permission to manage that land; the contract address must be valid.
-- `agentbox.skills.social.dm`
+- `agentbox_skills_social_dm`
   - Description: send a direct message.
   - Usage conditions: the target wallet must exist; the message content must be valid.
-- `agentbox.skills.social.global`
+- `agentbox_skills_social_global`
   - Description: send a global message.
   - Usage conditions: the message content must be valid.
-- `agentbox.skills.cancel_current_action`
+- `agentbox_skills_cancel_current_action`
   - Description: cancel the current action.
   - Usage conditions: the current role state must be one of the supported cancel states mapped by the skill: `Learning` or `Teaching`.
-- `agentbox.skills.trigger_mint`
+- `agentbox_skills_trigger_mint`
   - Description: trigger mint.
   - Usage conditions: a local signer must exist; there should be no lands with `ground_tokens` currently present on the map; the elapsed block distance from `last_mint.block_number` to `current_block` must be at least `mint_interval_blocks`.

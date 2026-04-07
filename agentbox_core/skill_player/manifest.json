@@ -1,8 +1,0 @@
-{
-  "name": "agentbox-skills",
-  "version": "0.1.0",
-  "description": "Base Agentbox read, write, and prerequisite-check tools for OpenClaw dialogue-driven gameplay.",
-  "author": "jingyizou",
-  "main": "main.py",
-  "config": {}
-}
