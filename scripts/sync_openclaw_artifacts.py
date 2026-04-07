@@ -106,7 +106,7 @@ def main() -> None:
     _sync_managed_skill_install()
     if not args.keep_data:
         _reset_skill_data()
-    _clear_session_history()
+        _clear_session_history()
     _restart_gateway()
     print(f"Synced managed skill to {OPENCLAW_SKILL_DIR}")
     if not args.keep_data:
@@ -114,9 +114,10 @@ def main() -> None:
             f"Reset runtime data under {OPENCLAW_SKILL_DIR / '.data'} "
             "(preserved signer private-key files only)"
         )
+        print("Cleared OpenClaw session history for main and player-agent")
     else:
         print(f"Preserved runtime data under {OPENCLAW_SKILL_DIR / '.data'}")
-    print("Cleared OpenClaw session history for main and player-agent")
+        print("Preserved OpenClaw session history for main and player-agent")
     print("Restarted OpenClaw gateway")
 
 

@@ -10,6 +10,7 @@ from .state import (
     ROLE_STATE_LEARNING,
     ROLE_STATE_TEACHING,
     ROLE_STATE_TELEPORTING,
+    normalize_role_state,
 )
 
 
@@ -52,7 +53,7 @@ class ActionSupport:
         resource_type = int(current_land.get("resourceType") or 0)
         land_is_resource = bool(current_land.get("isResourcePoint"))
         has_stock = int(current_land.get("stock") or 0) > 0
-        role_idle = int(role.get("state") or -1) == ROLE_STATE_IDLE
+        role_idle = normalize_role_state(role.get("state")) == ROLE_STATE_IDLE
         required_skill_learned = resource_type > 0 and resource_type in learned
         can_start = land_is_resource and has_stock and role_idle and required_skill_learned
         reasons = []
@@ -82,7 +83,7 @@ class ActionSupport:
         npcs = (world.get("staticInfo") or {}).get("all_npcs") or []
         npc = next((item for item in npcs if int(item.get("npcId") or 0) == int(npc_id)), None)
         learned = _skill_ids(me)
-        role_idle = int(role.get("state") or -1) == ROLE_STATE_IDLE
+        role_idle = normalize_role_state(role.get("state")) == ROLE_STATE_IDLE
         at_npc = npc is not None and int(role.get("x") or -1) == int(npc.get("x") or -2) and int(role.get("y") or -1) == int(npc.get("y") or -2)
         skill_id = int((npc or {}).get("skillId") or 0)
         can_start = npc is not None and role_idle and at_npc and skill_id > 0 and skill_id not in learned
@@ -111,7 +112,7 @@ class ActionSupport:
         recipe = next((item for item in recipes if int(item.get("recipeId") or 0) == int(recipe_id)), None)
         learned = _skill_ids(me)
         balances = _resource_amounts(me)
-        role_idle = int(role.get("state") or -1) == ROLE_STATE_IDLE
+        role_idle = normalize_role_state(role.get("state")) == ROLE_STATE_IDLE
         has_skill = recipe is not None and int(recipe.get("requiredSkill") or 0) in learned
         missing_resources: List[Dict[str, int]] = []
         if recipe is not None:
@@ -180,7 +181,7 @@ class ActionSupport:
     def list_available_actions(self, role_wallet: str) -> List[Dict[str, Any]]:
         me = self.runtime.read_me(role_wallet, source="auto")["data"]
         role = me.get("role") or {}
-        state = int(role.get("state") or -1)
+        state = normalize_role_state(role.get("state"))
         finishable = self.check_finishable(role_wallet)
         items: List[Dict[str, Any]] = []
         if finishable.get("canFinish"):

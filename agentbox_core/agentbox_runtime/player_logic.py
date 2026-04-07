@@ -31,12 +31,14 @@ from .rpc import make_web3
 from .schemas import ADDRESS, BOOL, PROFILE_MODE, READ_SOURCE, ROLE, STRING, TARGET_WALLET, UINT, obj
 from .signer_store import SignerService
 from .state import (
+    ROLE_STATE_CRAFTING,
     ROLE_STATE_GATHERING,
     ROLE_STATE_IDLE,
     ROLE_STATE_LEARNING,
     ROLE_STATE_PENDING_SPAWN,
     ROLE_STATE_TELEPORTING,
     ROLE_STATE_TEACHING,
+    normalize_role_state,
 )
 from .tooling import ToolSpec
 from .tx import estimate_required_balance, send_transaction
@@ -579,7 +581,7 @@ class PlayerRuntime:
 
     def finish_current_action(self, role_wallet: str) -> Dict[str, Any]:
         finishable = self.read_action_finishable(role_wallet, source="chain")["data"]
-        state = int(finishable.get("state") or -1)
+        state = normalize_role_state(finishable.get("state"))
         if state == ROLE_STATE_LEARNING:
             return self.learn_finish(role_wallet)
         if state == ROLE_STATE_CRAFTING:
