@@ -132,12 +132,10 @@ class PlayerRuntime:
 
     def _build_tools(self) -> List[ToolSpec]:
         return [
-            ToolSpec("agentbox.signer.prepare", "Create and activate a single local gameplay private key.", obj({"label": STRING, "activate": BOOL}), lambda rt, p: rt.signer_prepare(label=p.get("label"), activate=p.get("activate", True))),
-            ToolSpec("agentbox.signer.import", "Import and activate a single local gameplay private key.", obj({"privateKey": STRING, "label": STRING, "activate": BOOL}, ["privateKey"]), lambda rt, p: rt.signer_import(private_key=p["privateKey"], label=p.get("label"), activate=p.get("activate", True))),
+            ToolSpec("agentbox.signer.prepare", "Create the single local gameplay private key.", obj({"label": STRING}), lambda rt, p: rt.signer_prepare(label=p.get("label"))),
+            ToolSpec("agentbox.signer.import", "Import the single local gameplay private key.", obj({"privateKey": STRING, "label": STRING}, ["privateKey"]), lambda rt, p: rt.signer_import(private_key=p["privateKey"], label=p.get("label"))),
             ToolSpec("agentbox.signer.export", "Export the currently stored local gameplay private key.", obj({}), lambda rt, p: rt.signer_export()),
-            ToolSpec("agentbox.signer.activate", "Re-activate the single stored signer if it matches the current signer id.", obj({"signerId": STRING}, ["signerId"]), lambda rt, p: rt.signer_activate(p["signerId"])),
             ToolSpec("agentbox.signer.read", "Read the current local signer state.", obj({}), lambda rt, p: rt.signer_read()),
-            ToolSpec("agentbox.registration.prepare", "Prepare direct registration with the active signer.", obj({}), lambda rt, p: rt.registration_prepare()),
             ToolSpec("agentbox.registration.confirm", "Confirm direct registration with the active signer and continue registration.", obj({"profileMode": PROFILE_MODE, "nickname": STRING, "gender": UINT}), lambda rt, p: rt.registration_confirm(profile_mode=p.get("profileMode"), nickname=p.get("nickname"), gender=p.get("gender"))),
             ToolSpec("agentbox.skills.read_role_snapshot", "Read the current role snapshot grouped into staticInfo and dynamicInfo.", obj({"role": ROLE, "source": READ_SOURCE}), lambda rt, p: rt.read_role_snapshot(p["role"])),
             ToolSpec("agentbox.skills.read_world_static_info", "Read lower-frequency world facts used for planning.", obj({"role": ROLE}), lambda rt, p: rt.read_world_static_info(p["role"])),
@@ -837,37 +835,22 @@ class PlayerRuntime:
 
     def _require_default_signer(self) -> LocalAccount:
         if self.signer is None:
-            raise precheck_error("MISSING_ACTIVE_SIGNER", "An active local signer is required for this action")
+            raise precheck_error("MISSING_SIGNER", "A local signer is required for this action")
         return self.signer
 
-    def _active_signer_payload(self) -> Dict[str, Any]:
+    def _signer_payload(self) -> Dict[str, Any]:
         self._refresh_active_signer()
-        signers = []
-        for record in self.signers.list_signers():
-            signers.append(
-                {
-                    "signerId": record.signer_id,
-                    "address": record.address,
-                    "status": record.status,
-                    "label": record.label,
-                    "balanceEth": self._format_eth(int(self.web3.eth.get_balance(record.address))),
-                    "hasPrivateKey": bool(getattr(record, "private_key", None)),
-                }
-            )
-        active = None
-        if self.signer_record is not None:
-            active = {
+        if self.signer_record is None:
+            return {"hasSigner": False, "signer": None}
+        return {
+            "hasSigner": True,
+            "signer": {
                 "signerId": self.signer_record.signer_id,
                 "address": self.signer_record.address,
-                "status": self.signer_record.status,
                 "label": self.signer_record.label,
                 "balanceEth": self._format_eth(int(self.web3.eth.get_balance(self.signer_record.address))),
                 "hasPrivateKey": self.signer is not None,
-            }
-        return {
-            "hasActiveSigner": self.signer is not None,
-            "activeSigner": active,
-            "signers": signers,
+            },
         }
 
     def _format_eth(self, amount_wei: int) -> str:
@@ -892,7 +875,6 @@ class PlayerRuntime:
         return {
             "signerId": self.signer_record.signer_id,
             "address": self.signer_record.address,
-            "status": self.signer_record.status,
             "label": self.signer_record.label,
             "balanceEth": self._format_eth(int(self.web3.eth.get_balance(self.signer_record.address))),
         }
@@ -999,39 +981,6 @@ class PlayerRuntime:
         role_id = int(self.role.call("tokenOfOwnerByIndex", owner_address, balance - 1))
         role_wallet = self.role.call("wallets", role_id)
         return role_id, role_wallet
-
-    def registration_prepare(self) -> Dict[str, Any]:
-        signer = self._require_default_signer()
-        min_balance_wei = self.settings.minimum_native_balance_wei()
-        registration_value_wei = self.settings.registration_value_wei()
-        suggested_nickname, suggested_gender = self._generate_registration_profile()
-        self._runtime_state_update(
-            registration_phase="registration_awaiting_funding",
-            signer_phase="signer_ready",
-            status="awaiting_registration",
-            worker_status="idle",
-        )
-        return success_result(
-            "agentbox.registration.prepare",
-            "Active signer prepared for direct registration",
-            data={
-                "depositAddress": signer.address,
-                "registrationStatus": "awaiting_funding",
-                "requiredBalanceEth": self._format_eth(min_balance_wei),
-                "registrationValueEth": self._format_eth(registration_value_wei),
-                "gasBufferEth": self._format_eth(max(min_balance_wei - registration_value_wei, 0)),
-                "registrationStage": "choose_profile_and_fund",
-                "profilePrompt": {
-                    "message": "Before confirming registration, the user can provide a nickname and gender, skip profile setup, or let the agent auto-generate one.",
-                    "acceptedProfileModes": ["manual", "skip", "auto_generate"],
-                    "suggestedProfile": {
-                        "nickname": suggested_nickname,
-                        "gender": suggested_gender,
-                    },
-                },
-                "message": f"Fund the active signer with more than {self._format_eth(registration_value_wei)} ETH, keeping at least {self._format_eth(min_balance_wei)} ETH total for gas and registration.",
-            },
-        )
 
     def registration_confirm(
         self,
@@ -1287,8 +1236,8 @@ class PlayerRuntime:
         tx = send_transaction(self.web3, self.settings, getattr(self.economy.contract.functions, method)(*args), account=self._require_default_signer())
         return success_result(action, summary, data={}, tx_hash=tx["txHash"], chain_id=self.settings.chain_id, block_number=tx["blockNumber"])
 
-    def signer_prepare(self, *, label: Optional[str] = None, activate: bool = True) -> Dict[str, Any]:
-        record = self.signers.prepare_signer(label=label, activate=activate)
+    def signer_prepare(self, *, label: Optional[str] = None) -> Dict[str, Any]:
+        record = self.signers.prepare_signer(label=label)
         self._refresh_active_signer()
         self._runtime_state_update(signer_phase="signer_ready")
         return success_result(
@@ -1297,14 +1246,13 @@ class PlayerRuntime:
             data={
                 "signerId": record.signer_id,
                 "address": record.address,
-                "status": record.status,
                 "label": record.label,
-                "signerState": self._active_signer_payload(),
+                "signerState": self._signer_payload(),
             },
         )
 
-    def signer_import(self, *, private_key: str, label: Optional[str] = None, activate: bool = True) -> Dict[str, Any]:
-        record = self.signers.import_signer(private_key, label=label, activate=activate)
+    def signer_import(self, *, private_key: str, label: Optional[str] = None) -> Dict[str, Any]:
+        record = self.signers.import_signer(private_key, label=label)
         self._refresh_active_signer()
         self._runtime_state_update(signer_phase="signer_ready")
         return success_result(
@@ -1313,9 +1261,8 @@ class PlayerRuntime:
             data={
                 "signerId": record.signer_id,
                 "address": record.address,
-                "status": record.status,
                 "label": record.label,
-                "signerState": self._active_signer_payload(),
+                "signerState": self._signer_payload(),
             },
         )
 
@@ -1327,27 +1274,10 @@ class PlayerRuntime:
             data={
                 "signerId": record.signer_id,
                 "address": record.address,
-                "status": record.status,
                 "label": record.label,
                 "privateKey": record.private_key,
             },
         )
 
-    def signer_activate(self, signer_id: str) -> Dict[str, Any]:
-        record = self.signers.activate(signer_id)
-        self._refresh_active_signer()
-        self._runtime_state_update(signer_phase="signer_ready")
-        return success_result(
-            "agentbox.signer.activate",
-            "Local signer activated",
-            data={
-                "signerId": record.signer_id,
-                "address": record.address,
-                "status": record.status,
-                "label": record.label,
-                "signerState": self._active_signer_payload(),
-            },
-        )
-
     def signer_read(self) -> Dict[str, Any]:
-        return success_result("agentbox.signer.read", "Loaded signer state", data=self._active_signer_payload())
+        return success_result("agentbox.signer.read", "Loaded signer state", data=self._signer_payload())

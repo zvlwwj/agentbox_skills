@@ -9,55 +9,28 @@ description: Base Agentbox gameplay tools for OpenClaw agent orchestration on Ba
 
 Agentbox is an onchain, state-driven game. A role can pick up AGC tokens, move, teleport, learn, gather, craft, fight, and interact with NPCs, other players, and lands.
 
-Contract source:
+Refer to the contract source when needed:
 - https://github.com/zvlwwj/agentbox_solidity/tree/master/src
 
 ## Description
 
-Use this skill as the base capability surface for the OpenClaw agent, not as a manual end-user surface for calling atomic actions one by one.
-
-This skill provides the OpenClaw agent with:
-
-- role and world reads
-- signer and registration helpers
-- direct chain actions
-- prerequisite checks
-- lightweight summaries for planning
-
-## Preferred usage
-
-The intended usage is for the OpenClaw agent to orchestrate these tools in a dialogue loop:
-
-1. read the current role or world state
-2. check prerequisites for the intended action
-3. submit one direct write action
-4. read state again
-
-At the user layer, the interaction should look like:
-
-1. the user expresses a goal in natural language
-2. the OpenClaw agent derives the stage goal and next operation
-3. the OpenClaw agent calls these tools to execute atomic actions
-4. background execution can later be layered on top of this tool surface
+This skill provides the OpenClaw agent with Agentbox state reads, prerequisite checks, and onchain action execution.
+The tools are grouped into reads, checks, and writes.
 
 ## Tool reference
 
 ### Signer and registration helpers
 
 - `agentbox.signer.prepare`
-  - Description: create and activate the single local gameplay private key.
+  - Description: create the single local gameplay private key.
 - `agentbox.signer.import`
-  - Description: import and activate the single local gameplay private key.
+  - Description: import the single local gameplay private key.
 - `agentbox.signer.export`
   - Description: export the current local gameplay private key.
-- `agentbox.signer.activate`
-  - Description: re-activate the current local gameplay private key.
 - `agentbox.signer.read`
-  - Description: read the current local signer state.
-- `agentbox.registration.prepare`
-  - Description: prepare direct registration with the active signer.
+  - Description: read the current local signer information.
 - `agentbox.registration.confirm`
-  - Description: confirm active-signer funding and continue registration.
+  - Description: check registration with the current local signer, return any required top-up information, recover existing onchain registration state, or create the role if registration can proceed.
 
 ### State reads
 
@@ -73,6 +46,15 @@ At the user layer, the interaction should look like:
     - `dynamicInfo.balances`
     - `dynamicInfo.resourceBalances`
     - `dynamicInfo.finishable`
+  - Key fields to pay attention to:
+    - `dynamicInfo.role.state`
+    - `dynamicInfo.role.x`
+    - `dynamicInfo.role.y`
+    - `dynamicInfo.role.speed`
+    - `dynamicInfo.role.hp`
+    - `dynamicInfo.role.range`
+    - `dynamicInfo.action`
+    - `dynamicInfo.finishable.canFinish`
 - `agentbox.skills.read_world_static_info`
   - Description: read relatively static world information.
   - Main returned fields:
@@ -87,6 +69,13 @@ At the user layer, the interaction should look like:
 - `agentbox.skills.read_world_dynamic_info`
   - Description: read dynamic world information.
   - Main returned fields:
+    - `current_block`
+    - `current_land`
+    - `nearby_roles`
+    - `nearby_lands`
+    - `lands_with_ground_tokens`
+    - `last_mint`
+  - Key fields to pay attention to:
     - `current_block`
     - `current_land`
     - `nearby_roles`
@@ -188,74 +177,59 @@ At the user layer, the interaction should look like:
 
 ### Onchain actions
 
+These onchain actions share the following common conditions:
+
+- A local signer must exist.
+- If the role has a `controller`, the signer must be the `controller`. Otherwise, the signer must be the `owner`.
+
 - `agentbox.skills.move.instant`
   - Description: move to a target coordinate.
-  - Usage conditions: the role should currently be allowed to move; the target coordinate should be explicit; if the role is already in a long-running action, the agent should usually check whether it should `finish` or `cancel` first.
+  - Usage conditions: the role must currently be `Idle`; the target coordinate must be explicit; the movement distance must fit within the role's current `speed`.
 - `agentbox.skills.teleport.start`
   - Description: start teleporting.
-  - Usage conditions: the role should currently be allowed to start teleporting; do not start it again while already `Teleporting`; once started, teleport usually requires waiting and later `finish`.
+  - Usage conditions: the role must currently be `Idle`; the teleport target must be explicit; do not start teleport again while already `Teleporting`; after starting, teleport usually requires waiting and later `finish`.
 - `agentbox.skills.finish_current_action`
   - Description: finish the current action.
-  - Usage conditions: `finishable.canFinish` should be true; this applies to `start -> finish` flows such as teleporting, learning, gathering, and crafting.
+  - Usage conditions: `finishable.canFinish` must be true; the current role state must be one of the supported finish states mapped by the skill: `Learning`, `Crafting`, `Gathering`, or `Teleporting`.
 - `agentbox.skills.gather.start`
   - Description: start gathering.
-  - Usage conditions: the role should be standing on the correct resource point; the land should be gatherable; the role state should allow gathering; relevant gather prerequisites should already be satisfied.
+  - Usage conditions: the role must currently be `Idle`; the role must already be standing on the current resource land; the current land must be a resource point with stock remaining; the land's `resourceType` must correspond to a learned skill.
 - `agentbox.skills.learn.npc.start`
   - Description: start learning from an NPC.
-  - Usage conditions: the role should be at the correct NPC location; the NPC should provide the target skill; the role state should allow learning.
+  - Usage conditions: the role must currently be `Idle`; the role must be at the NPC's exact coordinate; the NPC must exist and provide the target skill; the target skill must not already be learned.
 - `agentbox.skills.learn.player.request`
   - Description: send a player-learning request.
-  - Usage conditions: the target player should exist and be able to teach; position and state requirements for player-to-player learning should be satisfied.
+  - Usage conditions: the role must currently be `Idle`; the target teacher wallet must exist; player-to-player teaching position and teaching-state requirements must be satisfied onchain.
 - `agentbox.skills.learn.player.accept`
   - Description: accept a player-learning interaction.
-  - Usage conditions: there should be a pending request that can be accepted; the role state should allow acceptance.
+  - Usage conditions: the role must currently be `Idle`; the student wallet must exist; there must be a pending teaching interaction that can be accepted onchain.
 - `agentbox.skills.craft.start`
   - Description: start crafting.
-  - Usage conditions: the required recipe, resources, and skill prerequisites should already be available; the role state should allow crafting.
+  - Usage conditions: the role must currently be `Idle`; the recipe must exist; the required skill must already be learned; all required resources must already be available in sufficient amounts.
 - `agentbox.skills.combat.attack`
   - Description: attack a target role.
-  - Usage conditions: the target role should exist; range, state, and combat prerequisites should be satisfied; avoid attacking invalid or non-attackable targets.
+  - Usage conditions: the role must currently be `Idle`; the target wallet must exist; attack range and other combat prerequisites must be satisfied onchain.
 - `agentbox.skills.equip.put_on`
   - Description: equip an item.
-  - Usage conditions: the target equipment should exist and be wearable; the corresponding slot should allow equipping.
+  - Usage conditions: the role must currently be `Idle`; the target equipment must exist, be owned by the role, and be wearable in its slot.
 - `agentbox.skills.equip.take_off`
   - Description: unequip an item.
-  - Usage conditions: the target equipment should currently be equipped.
+  - Usage conditions: the role must currently be `Idle`; the specified equipment slot must currently contain an equipped item.
 - `agentbox.skills.land.buy`
   - Description: buy a land.
-  - Usage conditions: the target land should be purchasable; balance and purchase prerequisites should be satisfied.
+  - Usage conditions: the role must already be standing on the target land coordinate; the land must be purchasable and the signer must satisfy the required payment condition.
 - `agentbox.skills.land.set_contract`
   - Description: set a land contract.
-  - Usage conditions: the role should own the land or otherwise have permission; the target contract parameters should be valid.
+  - Usage conditions: the role must already be standing on the target land coordinate; the role must have permission to manage that land; the contract address must be valid.
 - `agentbox.skills.social.dm`
   - Description: send a direct message.
-  - Usage conditions: the target should be explicit; the message content should be valid.
+  - Usage conditions: the target wallet must exist; the message content must be valid.
 - `agentbox.skills.social.global`
   - Description: send a global message.
-  - Usage conditions: the message content should be valid and the system should currently allow global sending.
+  - Usage conditions: the message content must be valid.
 - `agentbox.skills.cancel_current_action`
   - Description: cancel the current action.
-  - Usage conditions: there should be a cancellable current action; consider it when the current action cannot yet be finished and continuing to wait is no longer reasonable.
+  - Usage conditions: the current role state must be one of the supported cancel states mapped by the skill: `Learning` or `Teaching`.
 - `agentbox.skills.trigger_mint`
   - Description: trigger mint.
-  - Usage conditions: the agent should usually first confirm that there is no more direct token opportunity already available and that enough blocks have passed since the last mint.
-
-## Runtime configuration
-
-This skill uses built-in runtime defaults from `agentbox_core/agentbox_runtime/config.py`.
-
-Default values include:
-
-- `RPC_URL = https://sepolia.base.org`
-- `CHAIN_ID = 84532`
-- `INDEXER_BASE_URL = http://127.0.0.1:8000`
-- local signer store path
-- registration and auto-play balance thresholds
-
-## Interaction model
-
-- The user provides intent and constraints, while the OpenClaw agent turns them into goals, operations, and tool calls.
-- This skill provides reliable reads, validations, and atomic action execution.
-- The long-term direction of this project is to let the OpenClaw agent build goal generation, operation generation, and background execution on top of these tools.
-- Until that background layer exists, this project should still be treated as an agent-orchestration tool layer.
-- Local signer storage uses a single-private-key model and does not support multi-key management.
+  - Usage conditions: a local signer must exist; there should be no lands with `ground_tokens` currently present on the map; the elapsed block distance from `last_mint.block_number` to `current_block` must be at least `mint_interval_blocks`.

@@ -12,6 +12,9 @@ from eth_account.signers.local import LocalAccount
 from .config import PlayerSettings
 from .errors import precheck_error
 
+DEFAULT_SIGNER_LABEL = "local-gameplay-signer"
+LEGACY_SIGNER_LABELS = {"hosted-registration-owner"}
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -21,7 +24,6 @@ def _utc_now() -> str:
 class SignerRecord:
     signer_id: str
     address: str
-    status: str
     created_at: str
     updated_at: str
     private_key: str
@@ -35,7 +37,6 @@ class SignerRecord:
         return cls(
             signer_id=payload["signer_id"],
             address=payload["address"],
-            status=payload["status"],
             created_at=payload["created_at"],
             updated_at=payload["updated_at"],
             private_key=payload["private_key"],
@@ -56,17 +57,25 @@ class SignerStore:
         self._ensure_store_dir()
         self.record_path.write_text(json.dumps(record.to_dict(), indent=2, sort_keys=True))
 
+    def _normalize_record(self, record: SignerRecord) -> SignerRecord:
+        if record.label in LEGACY_SIGNER_LABELS or not record.label:
+            record.label = DEFAULT_SIGNER_LABEL
+        return record
+
     def load_record(self, signer_id: Optional[str] = None) -> SignerRecord:
         if not self.record_path.exists():
             raise precheck_error("UNKNOWN_SIGNER_ID", "Signer was not found")
         payload = json.loads(self.record_path.read_text())
-        record = SignerRecord.from_dict(payload)
+        record = self._normalize_record(SignerRecord.from_dict(payload))
         if signer_id is not None and record.signer_id != signer_id:
             raise precheck_error(
                 "UNKNOWN_SIGNER_ID",
                 "Signer was not found",
                 {"signerId": signer_id},
             )
+        if payload.get("label") != record.label:
+            record.updated_at = _utc_now()
+            self.save_record(record)
         return record
 
     def list_records(self) -> List[SignerRecord]:
@@ -84,34 +93,32 @@ class SignerStore:
         return SignerRecord(
             signer_id=datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f"),
             address=account.address,
-            status="active",
             created_at=timestamp,
             updated_at=timestamp,
             private_key=account.key.hex(),
             label=label,
         )
 
-    def create_signer(self, *, label: Optional[str] = None, activate: bool = True) -> SignerRecord:
+    def create_signer(self, *, label: Optional[str] = None) -> SignerRecord:
         account = Account.create()
-        return self.ensure_account(account, label=label, activate=activate)
+        return self.ensure_account(account, label=label)
 
-    def ensure_account(self, account: LocalAccount, *, label: Optional[str] = None, activate: bool = True) -> SignerRecord:
+    def ensure_account(self, account: LocalAccount, *, label: Optional[str] = None) -> SignerRecord:
+        resolved_label = label or DEFAULT_SIGNER_LABEL
         existing = self.find_by_address(account.address)
         if existing is not None:
-            if label is not None:
-                existing.label = label
+            existing.label = resolved_label
             existing.private_key = account.key.hex()
-            existing.status = "active"
             existing.updated_at = _utc_now()
             self.save_record(existing)
             return existing
-        record = self._build_record(account, label=label)
+        record = self._build_record(account, label=resolved_label)
         self.save_record(record)
         return record
 
-    def import_signer(self, private_key: str, *, label: Optional[str] = None, activate: bool = True) -> SignerRecord:
+    def import_signer(self, private_key: str, *, label: Optional[str] = None) -> SignerRecord:
         account = Account.from_key(private_key)
-        return self.ensure_account(account, label=label, activate=activate)
+        return self.ensure_account(account, label=label)
 
     def export_signer(self) -> SignerRecord:
         return self.load_record()
@@ -124,14 +131,6 @@ class SignerStore:
             return record
         return None
 
-    def activate(self, signer_id: str) -> SignerRecord:
-        record = self.load_record(signer_id)
-        if record.status != "active":
-            record.status = "active"
-            record.updated_at = _utc_now()
-            self.save_record(record)
-        return record
-
     def load_account(self, signer_id: Optional[str] = None) -> Tuple[SignerRecord, LocalAccount]:
         record = self.load_record(signer_id)
         return record, Account.from_key(record.private_key)
@@ -141,10 +140,6 @@ class SignerStore:
             return None, None
         record = self.load_record()
         account = Account.from_key(record.private_key)
-        if record.status != "active":
-            record.status = "active"
-            record.updated_at = _utc_now()
-            self.save_record(record)
         return record, account
 
 
@@ -152,20 +147,17 @@ class SignerService:
     def __init__(self, settings: PlayerSettings) -> None:
         self.store = SignerStore(settings)
 
-    def prepare_signer(self, *, label: Optional[str] = None, activate: bool = True) -> SignerRecord:
-        return self.store.create_signer(label=label, activate=activate)
+    def prepare_signer(self, *, label: Optional[str] = None) -> SignerRecord:
+        return self.store.create_signer(label=label)
 
-    def import_signer(self, private_key: str, *, label: Optional[str] = None, activate: bool = True) -> SignerRecord:
-        return self.store.import_signer(private_key, label=label, activate=activate)
+    def import_signer(self, private_key: str, *, label: Optional[str] = None) -> SignerRecord:
+        return self.store.import_signer(private_key, label=label)
 
     def export_signer(self) -> SignerRecord:
         return self.store.export_signer()
 
-    def ensure_account(self, account: LocalAccount, *, label: Optional[str] = None, activate: bool = True) -> SignerRecord:
-        return self.store.ensure_account(account, label=label, activate=activate)
-
-    def activate(self, signer_id: str) -> SignerRecord:
-        return self.store.activate(signer_id)
+    def ensure_account(self, account: LocalAccount, *, label: Optional[str] = None) -> SignerRecord:
+        return self.store.ensure_account(account, label=label)
 
     def list_signers(self) -> List[SignerRecord]:
         return self.store.list_records()
