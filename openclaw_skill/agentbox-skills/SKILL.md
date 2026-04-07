@@ -139,6 +139,23 @@ The tools are grouped into reads, checks, and writes.
     - `stock`
     - `groundTokens`
     - `updatedAtBlock`
+- `agentbox.skills.read_id_mappings`
+  - Description: read the Agentbox ID mappings table so the agent can understand what each game ID means.
+  - Main returned fields:
+    - `skills`
+    - `resources`
+    - `roleStates`
+    - `actionTypes`
+    - `equipmentSlots`
+    - `equipments`
+    - `recipes`
+    - `npcs`
+    - `resourcePoints`
+  - Example uses:
+    - Use `skills` to know that skill `1` means wood gathering.
+    - Use `resources` to know that resource `1` means wood.
+    - Use `roleStates` to know that state `0` means `Idle`.
+    - Use `equipmentSlots` to know that slot `1` means weapon.
 - `agentbox.skills.read_global_config`
   - Description: read global configuration.
   - Main returned fields:

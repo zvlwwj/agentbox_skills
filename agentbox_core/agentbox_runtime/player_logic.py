@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
 import random
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from eth_account.signers.local import LocalAccount
@@ -48,6 +50,7 @@ from .world_info import WorldInfoBuilder
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 DEFAULT_ROLE_RESOURCE_TOKEN_IDS = [1, 2, 3]
 DEFAULT_ROLE_EQUIPMENT_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8]
+ID_MAPPINGS_PATH = Path(__file__).resolve().parents[1] / "id-mappings.json"
 
 
 class PlayerRuntime:
@@ -147,6 +150,7 @@ class PlayerRuntime:
             ToolSpec("agentbox.skills.read_land", "Read one land by landId or coordinate.", obj({"landId": UINT, "x": UINT, "y": UINT, "source": READ_SOURCE}), lambda rt, p: rt.read_land({"landId": p.get("landId"), "x": p.get("x"), "y": p.get("y")}, source=p.get("source"))),
             ToolSpec("agentbox.skills.read_last_mint", "Read the last mint event observed by the indexer.", obj({}), lambda rt, p: rt.read_last_mint()),
             ToolSpec("agentbox.skills.read_lands_with_ground_tokens", "Read all lands that currently have ground tokens.", obj({}), lambda rt, p: rt.read_lands_with_ground_tokens()),
+            ToolSpec("agentbox.skills.read_id_mappings", "Read the Agentbox ID mappings table from the indexer.", obj({}), lambda rt, p: rt.read_id_mappings()),
             ToolSpec("agentbox.skills.read_global_config", "Read current global config values.", obj({"source": READ_SOURCE}), lambda rt, p: rt.read_global_config(source=p.get("source"))),
             ToolSpec("agentbox.skills.move.instant", "Submit an instant move to a target coordinate.", obj({"role": ROLE, "x": UINT, "y": UINT}, ["role", "x", "y"]), lambda rt, p: rt.move_instant(p["role"], int(p["x"]), int(p["y"]))),
             ToolSpec("agentbox.skills.teleport.start", "Start teleporting to a target coordinate.", obj({"role": ROLE, "x": UINT, "y": UINT}, ["role", "x", "y"]), lambda rt, p: rt.teleport_start(p["role"], int(p["x"]), int(p["y"]))),
@@ -556,6 +560,19 @@ class PlayerRuntime:
             "agentbox.skills.read_lands_with_ground_tokens",
             "Loaded lands with ground tokens from the indexer",
             data={"items": items},
+        )
+
+    def read_id_mappings(self) -> Dict[str, Any]:
+        try:
+            payload = json.loads(ID_MAPPINGS_PATH.read_text(encoding="utf-8"))
+        except FileNotFoundError as exc:
+            raise precheck_error("ID_MAPPINGS_NOT_FOUND", "Bundled id-mappings.json was not found") from exc
+        except json.JSONDecodeError as exc:
+            raise precheck_error("ID_MAPPINGS_INVALID", "Bundled id-mappings.json is invalid") from exc
+        return success_result(
+            "agentbox.skills.read_id_mappings",
+            "Loaded bundled Agentbox ID mappings",
+            data=payload,
         )
 
     def move_instant(self, role_wallet: str, x: int, y: int) -> Dict[str, Any]:

@@ -57,6 +57,9 @@ class IndexerClient:
     def get_global_config(self) -> Dict[str, Any]:
         return self.get_json("/configs/global")
 
+    def get_id_mappings(self) -> Dict[str, Any]:
+        return self.get_json("/configs/id-mappings")
+
     def get_core_contracts(self) -> Dict[str, Any]:
         return self.get_json("/configs/core-contracts")
 

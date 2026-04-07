@@ -1,0 +1,160 @@
+{
+  "skills": {
+    "1": {
+      "name": "Wood gathering",
+      "label": "Woodcutting",
+      "relatedResourceType": 1
+    },
+    "2": {
+      "name": "Wool gathering",
+      "label": "Husbandry",
+      "relatedResourceType": 2
+    },
+    "3": {
+      "name": "Stone gathering",
+      "label": "Mining",
+      "relatedResourceType": 3
+    },
+    "4": {
+      "name": "Wooden sword crafting",
+      "label": "Skill 4",
+      "relatedResourceType": null
+    },
+    "5": {
+      "name": "Armor crafting",
+      "label": "Skill 5",
+      "relatedResourceType": null
+    }
+  },
+  "resources": {
+    "1": "wood",
+    "2": "wool",
+    "3": "stone"
+  },
+  "roleStates": {
+    "0": {
+      "enum": "Idle",
+      "meaning": "No active timed action"
+    },
+    "1": {
+      "enum": "Learning",
+      "meaning": "Learning from NPC or another player"
+    },
+    "2": {
+      "enum": "Teaching",
+      "meaning": "Teaching another player"
+    },
+    "3": {
+      "enum": "Crafting",
+      "meaning": "In crafting progress"
+    },
+    "4": {
+      "enum": "Gathering",
+      "meaning": "In gathering progress"
+    },
+    "5": {
+      "enum": "Teleporting",
+      "meaning": "Teleport started, waiting to finish"
+    },
+    "6": {
+      "enum": "PendingSpawn",
+      "meaning": "Waiting for VRF spawn result"
+    }
+  },
+  "actionTypes": {
+    "Teleport": {
+      "meaning": "Start or finish teleport"
+    },
+    "Gather": {
+      "meaning": "Start or finish gathering"
+    },
+    "Craft": {
+      "meaning": "Start or finish crafting"
+    },
+    "Learn": {
+      "meaning": "Start or finish NPC learning or completed learning settlement"
+    },
+    "RequestLearning": {
+      "meaning": "Sent a request to learn from another player"
+    },
+    "LearnFromPlayer": {
+      "meaning": "Player-learning flow accepted for the student"
+    },
+    "TeachPlayer": {
+      "meaning": "Teacher entered or left player-teaching flow"
+    },
+    "CancelLearning": {
+      "meaning": "Learning was canceled or interrupted"
+    },
+    "CancelTeaching": {
+      "meaning": "Teacher canceled teaching"
+    }
+  },
+  "equipmentSlots": {
+    "1": {
+      "name": "Weapon slot",
+      "label": "Weapon"
+    },
+    "2": {
+      "name": "Armor slot",
+      "label": "Armor"
+    }
+  },
+  "equipments": {
+    "1001": {
+      "name": "Wooden sword",
+      "slot": 1,
+      "config": "+20 ATK, +1 RNG"
+    },
+    "1002": {
+      "name": "Armor",
+      "slot": 2,
+      "config": "+20 DEF, +20 HP"
+    }
+  },
+  "recipes": {
+    "1": {
+      "requiredSkillId": 4,
+      "outputEquipmentId": 1001,
+      "name": "Wooden sword crafting recipe"
+    },
+    "2": {
+      "requiredSkillId": 5,
+      "outputEquipmentId": 1002,
+      "name": "Armor crafting recipe"
+    }
+  },
+  "npcs": {
+    "1": {
+      "skillId": 1,
+      "name": "Woodcutting teacher"
+    },
+    "2": {
+      "skillId": 2,
+      "name": "Husbandry teacher"
+    },
+    "3": {
+      "skillId": 3,
+      "name": "Mining teacher"
+    },
+    "4": {
+      "skillId": 4,
+      "name": "Wooden sword crafting teacher"
+    },
+    "5": {
+      "skillId": 5,
+      "name": "Armor crafting teacher"
+    }
+  },
+  "resourcePoints": {
+    "1": {
+      "name": "Wood point"
+    },
+    "2": {
+      "name": "Wool point"
+    },
+    "3": {
+      "name": "Stone point"
+    }
+  }
+}
