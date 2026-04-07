@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
 from typing import Any, Dict, List, Optional
+
+SKILL_DIR = Path(__file__).resolve().parent
+if str(SKILL_DIR) not in sys.path:
+    sys.path.insert(0, str(SKILL_DIR))
 
 from agentbox_runtime.errors import map_exception
 from agentbox_runtime.player_logic import PlayerRuntime
