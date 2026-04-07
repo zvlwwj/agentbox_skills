@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
-from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+
+import requests
 
 from .errors import rpc_error
 
@@ -26,28 +26,29 @@ class IndexerClient:
     def get_json(self, path: str, query: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         url = self._build_url(path, query=query)
         try:
-            with urlopen(url, timeout=self.timeout_seconds) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            raise rpc_error("INDEXER_HTTP", f"Indexer request failed with status {exc.code}: {url}") from exc
-        except URLError as exc:
+            response = requests.get(url, timeout=self.timeout_seconds)
+            response.raise_for_status()
+            return response.json()
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else "unknown"
+            raise rpc_error("INDEXER_HTTP", f"Indexer request failed with status {status}: {url}") from exc
+        except requests.RequestException as exc:
             raise rpc_error("INDEXER_UNAVAILABLE", f"Unable to reach indexer: {url}") from exc
-        except json.JSONDecodeError as exc:
+        except ValueError as exc:
             raise rpc_error("INDEXER_INVALID_JSON", f"Indexer returned invalid JSON: {url}") from exc
 
     def post_json(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         url = self._build_url(path)
-        body = json.dumps(payload).encode("utf-8")
-        request = Request(url, data=body, method="POST")
-        request.add_header("Content-Type", "application/json")
         try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            raise rpc_error("INDEXER_HTTP", f"Indexer request failed with status {exc.code}: {url}") from exc
-        except URLError as exc:
+            response = requests.post(url, json=payload, timeout=self.timeout_seconds)
+            response.raise_for_status()
+            return response.json()
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else "unknown"
+            raise rpc_error("INDEXER_HTTP", f"Indexer request failed with status {status}: {url}") from exc
+        except requests.RequestException as exc:
             raise rpc_error("INDEXER_UNAVAILABLE", f"Unable to reach indexer: {url}") from exc
-        except json.JSONDecodeError as exc:
+        except ValueError as exc:
             raise rpc_error("INDEXER_INVALID_JSON", f"Indexer returned invalid JSON: {url}") from exc
 
     def get_role_by_wallet(self, role_wallet: str) -> Dict[str, Any]:

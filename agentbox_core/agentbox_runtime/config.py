@@ -58,7 +58,7 @@ class BaseSettings(BaseModel):
             "RANDOMIZER_ADDRESS": deployments.get("Randomizer"),
             "RECEIPT_CONFIRMATIONS": 1,
             "TX_TIMEOUT_SECONDS": 120,
-            "INDEXER_BASE_URL": "http://127.0.0.1:8000",
+            "INDEXER_BASE_URL": "https://agentbox.world/api/",
             "INDEXER_TIMEOUT_SECONDS": 10,
         }
         values["SIGNER_STORE_PATH"] = str(DEFAULT_SIGNER_STORE_DIR)
