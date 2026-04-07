@@ -170,7 +170,6 @@ class PlayerRuntime:
             ToolSpec("agentbox.skills.check_learning_prerequisites", "Check whether learning from an NPC can start now.", obj({"role": ROLE, "npcId": UINT}, ["role", "npcId"]), lambda rt, p: rt.check_learning_prerequisites(p["role"], int(p["npcId"]))),
             ToolSpec("agentbox.skills.check_crafting_prerequisites", "Check whether crafting a recipe can start now.", obj({"role": ROLE, "recipeId": UINT}, ["role", "recipeId"]), lambda rt, p: rt.check_crafting_prerequisites(p["role"], int(p["recipeId"]))),
             ToolSpec("agentbox.skills.check_trigger_mint_prerequisites", "Check whether the token mint interval has elapsed and no ground tokens remain on the map.", obj({"role": ROLE}), lambda rt, p: rt.check_trigger_mint_prerequisites(p.get("role") or rt._resolve_default_role() or "")),
-            ToolSpec("agentbox.skills.list_available_actions", "List safe next-step actions from the current role and world state.", obj({"role": ROLE}, ["role"]), lambda rt, p: rt.list_available_actions(p["role"])),
             ToolSpec("agentbox.skills.summarize_role_state", "Summarize the current role state for dialogue planning.", obj({"role": ROLE}, ["role"]), lambda rt, p: rt.summarize_role_state(p["role"])),
             ToolSpec("agentbox.skills.summarize_world_static_info", "Summarize lower-frequency world facts for dialogue planning.", obj({"role": ROLE}, ["role"]), lambda rt, p: rt.summarize_world_static_info(p["role"])),
             ToolSpec("agentbox.skills.summarize_world_dynamic_info", "Summarize current nearby world dynamics for dialogue planning.", obj({"role": ROLE}, ["role"]), lambda rt, p: rt.summarize_world_dynamic_info(p["role"])),
@@ -802,13 +801,6 @@ class PlayerRuntime:
             "agentbox.skills.check_trigger_mint_prerequisites",
             "Checked trigger-mint prerequisites",
             data=self.action_support.check_trigger_mint_prerequisites(role_wallet),
-        )
-
-    def list_available_actions(self, role_wallet: str) -> Dict[str, Any]:
-        return success_result(
-            "agentbox.skills.list_available_actions",
-            "Listed safe next-step actions from current state",
-            data={"items": self.action_support.list_available_actions(role_wallet)},
         )
 
     def summarize_role_state(self, role_wallet: str) -> Dict[str, Any]:

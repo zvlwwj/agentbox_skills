@@ -172,8 +172,6 @@ The tools are grouped into reads, checks, and writes.
   - Description: summarize world static information.
 - `agentbox.skills.summarize_world_dynamic_info`
   - Description: summarize world dynamic information.
-- `agentbox.skills.list_available_actions`
-  - Description: list currently available actions.
 
 ### Onchain actions
 

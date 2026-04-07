@@ -178,36 +178,6 @@ class ActionSupport:
             "reasons": reasons,
         }
 
-    def list_available_actions(self, role_wallet: str) -> List[Dict[str, Any]]:
-        me = self.runtime.read_me(role_wallet, source="auto")["data"]
-        role = me.get("role") or {}
-        state = normalize_role_state(role.get("state"))
-        finishable = self.check_finishable(role_wallet)
-        items: List[Dict[str, Any]] = []
-        if finishable.get("canFinish"):
-            items.append({"action": "agentbox.skills.finish_current_action", "reason": "current_action_can_finish"})
-        if state == ROLE_STATE_IDLE:
-            gather = self.check_gather_prerequisites(role_wallet)
-            if gather.get("canExecute"):
-                items.append({"action": "agentbox.skills.gather.start", "reason": "standing_on_gatherable_resource_land"})
-            world = self.runtime.world_info_builder.build_world_info(role_wallet)
-            current_land = ((world.get("dynamicInfo") or {}).get("current_land") or {})
-            nearby_lands = (world.get("dynamicInfo") or {}).get("nearby_lands") or []
-            for land in nearby_lands:
-                if bool(land.get("isResourcePoint")) and int(land.get("stock") or 0) > 0 and (
-                    int(land.get("x") or -1) != int(current_land.get("x") or -2)
-                    or int(land.get("y") or -1) != int(current_land.get("y") or -2)
-                ):
-                    items.append({"action": "agentbox.skills.move.instant", "reason": "nearby_resource_land_available", "target": {"x": land.get("x"), "y": land.get("y")}})
-                    break
-            if self.check_trigger_mint_prerequisites(role_wallet).get("canExecute"):
-                items.append({"action": "agentbox.skills.trigger_mint", "reason": "mint_window_open_and_no_ground_tokens"})
-        elif state in {ROLE_STATE_LEARNING, ROLE_STATE_TEACHING}:
-            items.append({"action": "agentbox.skills.cancel_current_action", "reason": "current_state_supports_cancel"})
-        elif state in {ROLE_STATE_CRAFTING, ROLE_STATE_GATHERING, ROLE_STATE_TELEPORTING}:
-            items.append({"action": "agentbox.skills.finish_current_action", "reason": "current_state_may_require_finish"})
-        return items
-
     def summarize_role_state(self, role_wallet: str) -> Dict[str, Any]:
         snapshot = self.runtime.world_info_builder.build_role_snapshot(role_wallet)
         dynamic = snapshot.get("dynamicInfo") or {}
