@@ -183,6 +183,7 @@ export class AgentboxClient {
     this.core = new ethers.Contract(settings.coreAddress, abiFromFile(path.join(abiDir, "IAgentboxCore.json")), this.provider);
     this.role = new ethers.Contract(settings.roleAddress, abiFromFile(path.join(abiDir, "AgentboxRole.json")), this.provider);
     this.economy = new ethers.Contract(settings.economyAddress, abiFromFile(path.join(abiDir, "AgentboxEconomy.json")), this.provider);
+    this.config = new ethers.Contract(settings.configAddress, abiFromFile(path.join(abiDir, "AgentboxConfig.json")), this.provider);
     this.resource = new ethers.Contract(settings.resourceAddress, abiFromFile(path.join(abiDir, "AgentboxResource.json")), this.provider);
     this.indexer = new IndexerClient(settings.indexerBaseUrl, settings.indexerTimeoutMs);
   }
@@ -200,7 +201,13 @@ export class AgentboxClient {
   }
 
   async getGlobalConfig() {
-    return decodeGlobalConfig(await this.core.getGlobalConfig());
+    const decoded = decodeGlobalConfig(await this.core.getGlobalConfig());
+    try {
+      decoded.maxMintCount = normalizeValue(await this.config.maxMintCount());
+    } catch {
+      decoded.maxMintCount = null;
+    }
+    return decoded;
   }
 
   async getRoleIdentity(roleWallet) {
@@ -248,6 +255,10 @@ export class AgentboxClient {
 
   async getNpcSnapshot(npcId) {
     return normalizeValue(await this.core.getNpcSnapshot(npcId));
+  }
+
+  async getMintsCount() {
+    return normalizeValue(await this.economy.mintsCount());
   }
 
   async getRecipeSnapshot(recipeId) {

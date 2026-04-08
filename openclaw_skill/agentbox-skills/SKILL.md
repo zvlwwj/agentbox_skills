@@ -173,13 +173,13 @@ The tools are grouped into reads, checks, and writes.
 - `agentbox_skills_check_finishable`
   - Description: check whether the current action can be finished.
 - `agentbox_skills_check_gather_prerequisites`
-  - Description: check gather prerequisites.
+  - Description: check gather prerequisites, including whether the role is `Idle`, whether the current land is a resource point, whether the matching skill is learned, and whether the requested gather amount fits the current stock.
 - `agentbox_skills_check_learning_prerequisites`
-  - Description: check learning prerequisites.
+  - Description: check learning prerequisites, including whether the role is `Idle`, whether it is exactly on the NPC position, whether the NPC is idle, and whether the target skill is configured and not yet learned.
 - `agentbox_skills_check_crafting_prerequisites`
   - Description: check crafting prerequisites.
 - `agentbox_skills_check_trigger_mint_prerequisites`
-  - Description: check mint prerequisites.
+  - Description: check mint prerequisites, including whether the mint interval has elapsed and whether `mintsCount` is still below `maxMintCount`; whether any lands still have `ground_tokens` is returned as strategy-layer information.
 
 ### Planning support
 
@@ -192,38 +192,38 @@ The tools are grouped into reads, checks, and writes.
 
 ### Onchain actions
 
-These onchain actions share the following common conditions:
+Most onchain actions share the following common conditions:
 
 - A local signer must exist.
 - If the role has a `controller`, the signer must be the `controller`. Otherwise, the signer must be the `owner`.
 
 - `agentbox_skills_move_instant`
   - Description: move to a target coordinate.
-  - Usage conditions: the role must currently be `Idle`; the target coordinate must be explicit; the movement distance must fit within the role's current `speed`.
+  - Usage conditions: the role must currently be `Idle`; the target coordinate must be explicit; the target coordinate must be inside the map bounds; the movement distance must fit within the role's current `speed`.
 - `agentbox_skills_teleport_start`
   - Description: start teleporting.
-  - Usage conditions: the role must currently be `Idle`; the teleport target must be explicit; do not start teleport again while already `Teleporting`; after starting, teleport usually requires waiting and later `finish`.
+  - Usage conditions: the role must currently be `Idle`; the teleport target must be explicit; the target coordinate must be inside the map bounds; the target must not be the current position; do not start teleport again while already `Teleporting`; after starting, teleport usually requires waiting and later `finish`.
 - `agentbox_skills_finish_current_action`
   - Description: finish the current action.
-  - Usage conditions: `finishable.canFinish` must be true; the current role state must be one of the supported finish states mapped by the skill: `Learning`, `Crafting`, `Gathering`, or `Teleporting`.
+  - Usage conditions: `finishable.canFinish` must be true; the current role state must be one of the supported finish states mapped by the skill: `Learning`, `Crafting`, `Gathering`, or `Teleporting`; for `Learning`, the finish action follows the dedicated onchain `finishLearning` rules rather than the usual owner/controller permission gate.
 - `agentbox_skills_gather_start`
   - Description: start gathering.
   - Usage conditions: the role must currently be `Idle`; the role must already be standing on the current resource land; the current land must be a resource point with stock remaining; the land's `resourceType` must correspond to a learned skill.
 - `agentbox_skills_learn_npc_start`
   - Description: start learning from an NPC.
-  - Usage conditions: the role must currently be `Idle`; the role must be at the NPC's exact coordinate; the NPC must exist and provide the target skill; the target skill must not already be learned.
+  - Usage conditions: the role must currently be `Idle`; the role must be at the NPC's exact coordinate; the NPC must exist; the NPC must not currently be teaching; the NPC's target skill must have configured required learning blocks; the target skill must not already be learned.
 - `agentbox_skills_learn_player_request`
   - Description: send a player-learning request.
-  - Usage conditions: the role must currently be `Idle`; the target teacher wallet must exist; player-to-player teaching position and teaching-state requirements must be satisfied onchain.
+  - Usage conditions: the role must currently be `Idle`; the target teacher wallet must exist; teacher and student must be on the same coordinate; the teacher must already have the target skill; the student must not already have that skill; the target skill must have configured required learning blocks.
 - `agentbox_skills_learn_player_accept`
   - Description: accept a player-learning interaction.
-  - Usage conditions: the role must currently be `Idle`; the student wallet must exist; there must be a pending teaching interaction that can be accepted onchain.
+  - Usage conditions: the teacher must currently be `Idle`; the student wallet must exist; the student must currently be in `Learning`; `student.learning.teacherWallet` must equal the current teacher; `student.learning.startBlock` must still be `0`; teacher and student must be on the same coordinate.
 - `agentbox_skills_craft_start`
   - Description: start crafting.
   - Usage conditions: the role must currently be `Idle`; the recipe must exist; the required skill must already be learned; all required resources must already be available in sufficient amounts.
 - `agentbox_skills_combat_attack`
   - Description: attack a target role.
-  - Usage conditions: the role must currently be `Idle`; the target wallet must exist; attack range and other combat prerequisites must be satisfied onchain.
+  - Usage conditions: the role must currently be `Idle`; the target wallet must exist; the target's current `hp` must be greater than `0`; the target must be within the role's current attack `range`.
 - `agentbox_skills_equip_put_on`
   - Description: equip an item.
   - Usage conditions: the role must currently be `Idle`; the target equipment must exist, be owned by the role, and be wearable in its slot.
@@ -232,19 +232,19 @@ These onchain actions share the following common conditions:
   - Usage conditions: the role must currently be `Idle`; the specified equipment slot must currently contain an equipped item.
 - `agentbox_skills_land_buy`
   - Description: buy a land.
-  - Usage conditions: the role must already be standing on the target land coordinate; the land must be purchasable and the signer must satisfy the required payment condition.
+  - Usage conditions: the role must already be standing on the target land coordinate; the target land must not be a resource point; the target land must not already be owned; the role must have enough reliable balance to pay `landPrice`.
 - `agentbox_skills_land_set_contract`
   - Description: set a land contract.
-  - Usage conditions: the role must already be standing on the target land coordinate; the role must have permission to manage that land; the contract address must be valid.
+  - Usage conditions: the role must satisfy the common role permission gate; the target land must be owned by that `roleWallet`; `contractAddress` must be a valid address; the contract address must not already be bound to another land.
 - `agentbox_skills_social_dm`
   - Description: send a direct message.
-  - Usage conditions: the target wallet must exist; the message content must be valid.
+  - Usage conditions: the common role permission gate must be satisfied; the contract itself does not additionally validate target-wallet existence or message format.
 - `agentbox_skills_social_global`
   - Description: send a global message.
-  - Usage conditions: the message content must be valid.
+  - Usage conditions: the common role permission gate must be satisfied; the contract itself does not additionally validate message format.
 - `agentbox_skills_cancel_current_action`
   - Description: cancel the current action.
-  - Usage conditions: the current role state must be one of the supported cancel states mapped by the skill: `Learning` or `Teaching`.
+  - Usage conditions: if the current state is `Learning`, it must be player-to-player learning rather than NPC learning, and `learning.startBlock` must still be `0`; if the current state is `Teaching`, the role must actually be in an active teaching state.
 - `agentbox_skills_trigger_mint`
   - Description: trigger mint.
-  - Usage conditions: a local signer must exist; there should be no lands with `ground_tokens` currently present on the map; the elapsed block distance from `last_mint.block_number` to `current_block` must be at least `mint_interval_blocks`.
+  - Usage conditions: a local signer must exist; `mintsCount` must still be below `maxMintCount`; the elapsed block distance from `last_mint.block_number` to `current_block` must be at least `mint_interval_blocks`. Whether any lands still have `ground_tokens` is not a hard onchain precondition for `triggerMint`, though it may still be useful as a strategy-layer signal.

@@ -78,7 +78,7 @@ export function buildToolSpecs() {
     { name: "agentbox.skills.cancel_current_action", description: "Cancel the current cancelable action.", parameters: obj({ role: ROLE }, ["role"]) },
     { name: "agentbox.skills.trigger_mint", description: "Trigger token mint when mint prerequisites are satisfied.", parameters: obj({}) },
     { name: "agentbox.skills.check_finishable", description: "Check whether the current action can finish now.", parameters: obj({ role: ROLE }, ["role"]) },
-    { name: "agentbox.skills.check_gather_prerequisites", description: "Check whether gathering can start on the current land.", parameters: obj({ role: ROLE }, ["role"]) },
+    { name: "agentbox.skills.check_gather_prerequisites", description: "Check whether gathering can start on the current land.", parameters: obj({ role: ROLE, amount: UINT }, ["role", "amount"]) },
     { name: "agentbox.skills.check_learning_prerequisites", description: "Check whether learning from an NPC can start now.", parameters: obj({ role: ROLE, npcId: UINT }, ["role", "npcId"]) },
     { name: "agentbox.skills.check_crafting_prerequisites", description: "Check whether crafting a recipe can start now.", parameters: obj({ role: ROLE, recipeId: UINT }, ["role", "recipeId"]) },
     { name: "agentbox.skills.check_trigger_mint_prerequisites", description: "Check whether the token mint interval has elapsed and no ground tokens remain on the map.", parameters: obj({ role: ROLE }) },
@@ -173,7 +173,7 @@ export class JSPlayerRuntime {
       case "agentbox.skills.cancel_current_action": return this.cancelCurrentAction(payload.role);
       case "agentbox.skills.trigger_mint": return this.economyWrite(toolName, "triggerMint", [], "Mint trigger submitted");
       case "agentbox.skills.check_finishable": return successResult(toolName, "Checked finishability of the current action", { data: await this.checkFinishable(payload.role) });
-      case "agentbox.skills.check_gather_prerequisites": return successResult(toolName, "Checked gather prerequisites", { data: await this.checkGatherPrerequisites(payload.role) });
+      case "agentbox.skills.check_gather_prerequisites": return successResult(toolName, "Checked gather prerequisites", { data: await this.checkGatherPrerequisites(payload.role, Number(payload.amount)) });
       case "agentbox.skills.check_learning_prerequisites": return successResult(toolName, "Checked learning prerequisites", { data: await this.checkLearningPrerequisites(payload.role, Number(payload.npcId)) });
       case "agentbox.skills.check_crafting_prerequisites": return successResult(toolName, "Checked crafting prerequisites", { data: await this.checkCraftingPrerequisites(payload.role, Number(payload.recipeId)) });
       case "agentbox.skills.check_trigger_mint_prerequisites": return successResult(toolName, "Checked trigger-mint prerequisites", { data: await this.checkTriggerMintPrerequisites(payload.role) });
@@ -507,10 +507,12 @@ export class JSPlayerRuntime {
       equipment_catalog: {},
       all_resource_lands: [],
       mint_interval_blocks: null,
+      max_mint_count: null,
     };
     try {
       const config = (await this.readGlobalConfig("auto")).data;
       worldState.mint_interval_blocks = config.mintIntervalBlocks;
+      worldState.max_mint_count = config.maxMintCount;
     } catch {}
     try {
       worldState.current_block = Number(await this.client.provider.getBlockNumber());
@@ -608,6 +610,7 @@ export class JSPlayerRuntime {
         current_equipment_recipes: worldState.current_equipment_recipes,
         available_land_contracts: [],
         mint_interval_blocks: worldState.mint_interval_blocks,
+        max_mint_count: worldState.max_mint_count,
       },
       dynamicInfo: {
         current_block: worldState.current_block,
@@ -775,36 +778,70 @@ export class JSPlayerRuntime {
     };
   }
 
-  async checkGatherPrerequisites(roleWallet) {
+  async checkGatherPrerequisites(roleWallet, amount) {
     const me = (await this.readMe(roleWallet, "auto")).data;
     const world = await this.buildWorldInfo(roleWallet);
     const currentLand = world.dynamicInfo?.current_land || {};
     const learned = learnedSkillIds(me);
     const resourceType = Number(currentLand.resourceType || 0);
-    const canExecute = Boolean(currentLand.isResourcePoint) && Number(currentLand.stock || 0) > 0 && normalizeRoleState(me.role?.state) === ROLE_STATE_IDLE && resourceType > 0 && learned.has(resourceType);
+    const requestedAmount = Number(amount || 0);
+    const currentStock = Number(currentLand.stock || 0);
+    const canExecute = Boolean(currentLand.isResourcePoint)
+      && currentStock > 0
+      && normalizeRoleState(me.role?.state) === ROLE_STATE_IDLE
+      && resourceType > 0
+      && learned.has(resourceType)
+      && requestedAmount > 0
+      && currentStock >= requestedAmount;
     const reasons = [];
     if (!currentLand.isResourcePoint) reasons.push("current_land_is_not_resource_point");
-    if (!(Number(currentLand.stock || 0) > 0)) reasons.push("current_land_has_no_stock");
+    if (!(currentStock > 0)) reasons.push("current_land_has_no_stock");
     if (normalizeRoleState(me.role?.state) !== ROLE_STATE_IDLE) reasons.push("role_is_not_idle");
     if (resourceType <= 0) reasons.push("resource_type_missing");
     else if (!learned.has(resourceType)) reasons.push("required_skill_not_learned");
-    return { role: roleWallet, canExecute, currentLand, requiredSkillId: resourceType || null, learnedSkillIds: [...learned].sort(), reasons };
+    if (!(requestedAmount > 0)) reasons.push("invalid_amount");
+    else if (currentStock < requestedAmount) reasons.push("not_enough_stock_for_amount");
+    return {
+      role: roleWallet,
+      requestedAmount,
+      canExecute,
+      currentLand,
+      requiredSkillId: resourceType || null,
+      learnedSkillIds: [...learned].sort(),
+      reasons,
+    };
   }
 
   async checkLearningPrerequisites(roleWallet, npcId) {
     const me = (await this.readMe(roleWallet, "auto")).data;
-    const world = await this.buildWorldInfo(roleWallet);
-    const npc = (world.staticInfo?.all_npcs || []).find((item) => Number(item.npcId || 0) === npcId) || null;
     const learned = learnedSkillIds(me);
+    let npc = null;
+    try {
+      npc = await this.client.getNpcSnapshot(npcId);
+    } catch {}
     const atNpc = npc && Number(me.role?.x ?? -1) === Number(npc.x ?? -2) && Number(me.role?.y ?? -1) === Number(npc.y ?? -2);
     const skillId = Number(npc?.skillId || 0);
-    const canExecute = Boolean(npc) && normalizeRoleState(me.role?.state) === ROLE_STATE_IDLE && atNpc && skillId > 0 && !learned.has(skillId);
+    let requiredBlocks = 0;
+    if (skillId > 0) {
+      try {
+        requiredBlocks = Number(normalizeValue(await this.client.core.getSkillRequiredBlocks(skillId)) || 0);
+      } catch {}
+    }
+    const canExecute = Boolean(npc)
+      && normalizeRoleState(me.role?.state) === ROLE_STATE_IDLE
+      && atNpc
+      && !Boolean(npc?.isTeaching)
+      && skillId > 0
+      && requiredBlocks > 0
+      && !learned.has(skillId);
     const reasons = [];
     if (!npc) reasons.push("npc_not_found");
     if (normalizeRoleState(me.role?.state) !== ROLE_STATE_IDLE) reasons.push("role_is_not_idle");
     if (npc && !atNpc) reasons.push("role_not_at_npc_position");
+    if (npc?.isTeaching) reasons.push("npc_is_busy");
+    if (!(requiredBlocks > 0)) reasons.push("skill_not_configured");
     if (skillId > 0 && learned.has(skillId)) reasons.push("skill_already_learned");
-    return { role: roleWallet, npcId, canExecute, npc, reasons };
+    return { role: roleWallet, npcId, canExecute, npc, requiredSkillId: skillId || null, requiredBlocks, reasons };
   }
 
   async checkCraftingPrerequisites(roleWallet, recipeId) {
@@ -835,22 +872,30 @@ export class JSPlayerRuntime {
   async checkTriggerMintPrerequisites(roleWallet) {
     const resolvedRole = roleWallet || await this.resolveDefaultRole();
     if (!resolvedRole) {
-      return { canExecute: false, currentBlock: null, mintIntervalBlocks: null, lastMint: null, landsWithGroundTokensCount: null, reasons: ["missing_role"] };
+      return { canExecute: false, currentBlock: null, mintIntervalBlocks: null, maxMintCount: null, mintsCount: null, lastMint: null, landsWithGroundTokensCount: null, reasons: ["missing_role"] };
     }
     const world = await this.buildWorldInfo(resolvedRole);
     const currentBlock = world.dynamicInfo?.current_block;
     const lastMint = world.dynamicInfo?.last_mint || {};
     const mintIntervalBlocks = world.staticInfo?.mint_interval_blocks;
+    const maxMintCount = world.staticInfo?.max_mint_count;
+    let mintsCount = null;
+    try {
+      mintsCount = Number(await this.client.getMintsCount());
+    } catch {}
     const landsWithGroundTokens = world.dynamicInfo?.lands_with_ground_tokens || [];
     const enoughBlocks = currentBlock != null && mintIntervalBlocks != null && lastMint.block_number != null && Number(currentBlock) - Number(lastMint.block_number) >= Number(mintIntervalBlocks);
-    const noGroundTokens = landsWithGroundTokens.length === 0;
+    const belowMaxMintCount = maxMintCount == null || mintsCount == null ? true : Number(mintsCount) < Number(maxMintCount);
     const reasons = [];
-    if (!noGroundTokens) reasons.push("ground_tokens_already_present");
     if (!enoughBlocks) reasons.push("mint_interval_not_elapsed");
+    if (!belowMaxMintCount) reasons.push("max_mint_count_reached");
+    if (landsWithGroundTokens.length > 0) reasons.push("ground_tokens_already_present");
     return {
-      canExecute: noGroundTokens && enoughBlocks,
+      canExecute: enoughBlocks && belowMaxMintCount,
       currentBlock,
       mintIntervalBlocks,
+      maxMintCount,
+      mintsCount,
       lastMint,
       landsWithGroundTokensCount: landsWithGroundTokens.length,
       reasons,
@@ -1044,4 +1089,3 @@ export class JSPlayerRuntime {
     });
   }
 }
-
