@@ -49,7 +49,7 @@ export function loadSettings(pluginRoot) {
     economyAddress: contracts.Economy_ERC20,
     configAddress: contracts.Config,
     randomizerAddress: contracts.Randomizer,
-    indexerBaseUrl: "https://agentbox.world/api/",
+    indexerBaseUrl: "https://api.agentbox.world/",
     indexerTimeoutMs: 10000,
     receiptConfirmations: 1,
     txTimeoutSeconds: 120,
