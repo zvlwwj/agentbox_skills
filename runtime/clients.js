@@ -12,6 +12,7 @@ import {
   decodeFinishable,
   decodeGlobalConfig,
   decodeLandSnapshot,
+  decodeNpcSnapshot,
   decodeRoleActionSnapshot,
   decodeRoleIdentity,
   decodeRoleSnapshot,
@@ -27,6 +28,81 @@ import {
 function abiFromFile(filePath) {
   const payload = JSON.parse(fs.readFileSync(filePath, "utf8"));
   return Array.isArray(payload) ? payload : payload.abi;
+}
+
+function normalizeDiagnosticValue(value) {
+  if (typeof value === "bigint") return value.toString();
+  if (Array.isArray(value)) return value.map((entry) => normalizeDiagnosticValue(entry));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, normalizeDiagnosticValue(entry)]));
+  }
+  return value;
+}
+
+function collectHexCandidates(value, candidates = [], seen = new Set()) {
+  if (value == null) return candidates;
+  if (typeof value === "string") {
+    if (/^0x[0-9a-fA-F]+$/.test(value) && value.length >= 10) candidates.push(value);
+    return candidates;
+  }
+  if (typeof value !== "object") return candidates;
+  if (seen.has(value)) return candidates;
+  seen.add(value);
+  for (const entry of Object.values(value)) collectHexCandidates(entry, candidates, seen);
+  return candidates;
+}
+
+function selectRevertCandidate(contract, candidates) {
+  let fallback = null;
+  for (const candidate of candidates) {
+    const decoded = decodeRevertData(contract, candidate);
+    if (decoded?.name || decoded?.message) return candidate;
+    if (candidate.length !== 66 && fallback == null) fallback = candidate;
+    if (fallback == null) fallback = candidate;
+  }
+  return fallback;
+}
+
+function decodeRevertData(contract, revertData) {
+  if (typeof revertData !== "string" || !/^0x[0-9a-fA-F]+$/.test(revertData) || revertData.length < 10) return null;
+  const selector = revertData.slice(0, 10).toLowerCase();
+  if (selector === "0x08c379a0") {
+    try {
+      const [reason] = ethers.AbiCoder.defaultAbiCoder().decode(["string"], `0x${revertData.slice(10)}`);
+      return { selector, name: "Error", message: String(reason), args: [String(reason)] };
+    } catch {}
+  }
+  if (selector === "0x4e487b71") {
+    try {
+      const [code] = ethers.AbiCoder.defaultAbiCoder().decode(["uint256"], `0x${revertData.slice(10)}`);
+      const normalized = normalizeDiagnosticValue(code);
+      return { selector, name: "Panic", message: `panic code ${normalized}`, args: [normalized] };
+    } catch {}
+  }
+  try {
+    const parsed = contract.interface.parseError(revertData);
+    if (parsed) {
+      const args = normalizeDiagnosticValue(Array.from(parsed.args ?? []));
+      return { selector, name: parsed.name, message: parsed.signature || parsed.name, args };
+    }
+  } catch {}
+  return { selector, name: null, message: null, args: [] };
+}
+
+function extractErrorSummary(contract, error) {
+  const message = String(error?.shortMessage || error?.reason || error?.message || error || "");
+  const revertData = selectRevertCandidate(contract, collectHexCandidates(error)) ?? null;
+  const decoded = revertData ? decodeRevertData(contract, revertData) : null;
+  return {
+    message: decoded?.message || message,
+    data: {
+      rawMessage: message,
+      revertData,
+      revertSelector: decoded?.selector ?? null,
+      revertName: decoded?.name ?? null,
+      revertArgs: decoded?.args ?? [],
+    },
+  };
 }
 
 export function loadSettings(pluginRoot) {
@@ -254,7 +330,7 @@ export class AgentboxClient {
   }
 
   async getNpcSnapshot(npcId) {
-    return normalizeValue(await this.core.getNpcSnapshot(npcId));
+    return decodeNpcSnapshot(await this.core.getNpcSnapshot(npcId));
   }
 
   async getMintsCount() {
@@ -288,7 +364,17 @@ export class AgentboxClient {
     txRequest.value = BigInt(value);
     txRequest.chainId = this.settings.chainId;
     txRequest.nonce = await this.provider.getTransactionCount(wallet.address);
-    const gasEstimate = await this.provider.estimateGas({ ...txRequest, from: wallet.address });
+    let gasEstimate;
+    try {
+      gasEstimate = await this.provider.estimateGas({ ...txRequest, from: wallet.address });
+    } catch (error) {
+      const diagnostic = extractErrorSummary(contract, error);
+      throw txError("ESTIMATE_REVERT", diagnostic.message || "Transaction simulation failed during gas estimation", {
+        method,
+        args: normalizeDiagnosticValue(args),
+        ...diagnostic.data,
+      });
+    }
     txRequest.gasLimit = gasEstimate * 12n / 10n;
     const feeData = await this.provider.getFeeData();
     if (feeData.maxFeePerGas != null || feeData.maxPriorityFeePerGas != null) {
@@ -300,6 +386,15 @@ export class AgentboxClient {
     return txRequest;
   }
 
+  async diagnoseRevert(contract, txRequest, blockTag = "latest") {
+    try {
+      await this.provider.call({ ...txRequest, from: txRequest.from }, blockTag);
+      return null;
+    } catch (error) {
+      return extractErrorSummary(contract, error);
+    }
+  }
+
   async estimateRequiredBalance(contract, method, args, wallet, value = 0n) {
     const txRequest = await this.buildTxRequest(contract, method, args, wallet, value);
     const gasPrice = txRequest.maxFeePerGas ?? txRequest.gasPrice;
@@ -308,12 +403,23 @@ export class AgentboxClient {
   }
 
   async sendTransaction(contract, method, args, wallet, value = 0n) {
+    let txRequest;
     try {
-      const connected = contract.connect(wallet);
-      const txRequest = await this.buildTxRequest(contract, method, args, wallet, value);
+      txRequest = await this.buildTxRequest(contract, method, args, wallet, value);
       const txResponse = await wallet.sendTransaction(txRequest);
       const receipt = await txResponse.wait(this.settings.receiptConfirmations);
-      if (!receipt || receipt.status !== 1n) throw txError("FAILED", "Transaction reverted on chain");
+      const receiptStatus = receipt?.status == null ? null : Number(receipt.status);
+      if (!receipt || receiptStatus !== 1) {
+        const diagnostic = await this.diagnoseRevert(contract, { ...txRequest, from: wallet.address }, receipt?.blockNumber ?? "latest");
+        throw txError("FAILED", diagnostic?.message || "Transaction reverted on chain", {
+          method,
+          args: normalizeDiagnosticValue(args),
+          txHash: txResponse.hash,
+          blockNumber: receipt ? Number(receipt.blockNumber) : null,
+          receiptStatus,
+          ...diagnostic?.data,
+        });
+      }
       return {
         txHash: txResponse.hash,
         blockNumber: Number(receipt.blockNumber),
@@ -321,7 +427,19 @@ export class AgentboxClient {
       };
     } catch (error) {
       if (error?.errorCode) throw error;
-      throw txError("SEND_FAILED", String(error?.message || error));
+      const diagnostic = extractErrorSummary(contract, error);
+      if (txRequest) {
+        const replay = await this.diagnoseRevert(contract, { ...txRequest, from: wallet.address });
+        if (replay) {
+          diagnostic.message = replay.message || diagnostic.message;
+          diagnostic.data = { ...diagnostic.data, latestCallMessage: replay.message, ...replay.data };
+        }
+      }
+      throw txError("SEND_FAILED", diagnostic.message || String(error?.message || error), {
+        method,
+        args: normalizeDiagnosticValue(args),
+        ...diagnostic.data,
+      });
     }
   }
 

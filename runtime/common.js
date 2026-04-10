@@ -15,6 +15,7 @@ export const DEFAULT_ROLE_EQUIPMENT_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8];
 export const NEARBY_COORDINATE_DELTA = 100;
 export const PAGE_SIZE = 200;
 export const DEFAULT_SIGNER_LABEL = "local-gameplay-signer";
+export const LAND_COORDINATE_NOTE = "Coordinates are always ordered as (x, y). Do not infer x/y by splitting the digits of landId.";
 
 export const ADDRESS = { type: "string", description: "EVM address" };
 export const UINT = { type: "integer", minimum: 0 };
@@ -264,6 +265,15 @@ export function decodeEquipmentSnapshot(value) {
   };
 }
 
+export function buildCoordinateConvention(mapWidth = null) {
+  return {
+    order: ["x", "y"],
+    format: "(x, y)",
+    landIdFormula: mapWidth ? `landId = y * ${mapWidth} + x` : "landId = y * mapWidth + x",
+    note: LAND_COORDINATE_NOTE,
+  };
+}
+
 export function decodeEconomyBalances(value) {
   return {
     totalBalance: decodeField(value, 0, "totalBalance"),
@@ -308,4 +318,3 @@ export function formatEth(wei, formatEther) {
 export function defaultDataDir() {
   return path.join(os.homedir(), ".openclaw", "skills", "agentbox-skills", ".data");
 }
-

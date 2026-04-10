@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 OPENCLAW_ROOT = Path.home() / ".openclaw"
 OPENCLAW_DATA_DIR = OPENCLAW_ROOT / "skills" / "agentbox-skills"
 OPENCLAW_CONFIG_PATH = OPENCLAW_ROOT / "openclaw.json"
+WORKSPACE_DIR_GLOB = "workspace*"
 SESSION_DIRS = [
     OPENCLAW_ROOT / "agents" / "main" / "sessions",
     OPENCLAW_ROOT / "agents" / "player-agent" / "sessions",
@@ -62,6 +63,11 @@ def _clear_session_history() -> None:
                 item.unlink()
 
 
+def _clear_workspaces() -> None:
+    for workspace_dir in OPENCLAW_ROOT.glob(WORKSPACE_DIR_GLOB):
+        _remove_path(workspace_dir)
+
+
 def _detach_legacy_skill_entry() -> None:
     if not OPENCLAW_CONFIG_PATH.exists():
         return
@@ -105,7 +111,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--keep-data",
         action="store_true",
-        help="Keep the installed plugin runtime .data directory instead of resetting it during sync.",
+        help="Keep the installed plugin runtime .data directory, session history, and workspace directories instead of resetting them during sync.",
     )
     return parser.parse_args()
 
@@ -116,6 +122,7 @@ def main() -> None:
     if not args.keep_data:
         _reset_skill_data()
         _clear_session_history()
+        _clear_workspaces()
     _detach_legacy_skill_entry()
     _install_plugin()
     _ensure_plugin_allowlist()
@@ -127,9 +134,11 @@ def main() -> None:
             "(preserved signer private-key files only)"
         )
         print("Cleared OpenClaw session history for main and player-agent")
+        print(f"Removed OpenClaw workspace directories matching {WORKSPACE_DIR_GLOB!r}")
     else:
         print(f"Preserved runtime data under {OPENCLAW_DATA_DIR / '.data'}")
         print("Preserved OpenClaw session history for main and player-agent")
+        print(f"Preserved OpenClaw workspace directories matching {WORKSPACE_DIR_GLOB!r}")
     print("Restarted OpenClaw gateway")
 
 

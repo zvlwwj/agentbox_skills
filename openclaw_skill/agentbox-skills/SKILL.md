@@ -36,6 +36,10 @@ The tools are grouped into reads, checks, and writes.
 
 - `agentbox_skills_read_role_snapshot`
   - Description: read the full current role snapshot.
+  - Optional parameter: `source`
+    - `auto`: default, prefer indexer and fall back to chain.
+    - `chain`: force pure onchain role data; useful when verifying whether state has actually changed.
+    - `indexer`: force indexer-backed reads.
   - Main returned fields:
     - `staticInfo.identity`
     - `staticInfo.skills`
@@ -57,7 +61,12 @@ The tools are grouped into reads, checks, and writes.
     - `dynamicInfo.finishable.canFinish`
 - `agentbox_skills_read_world_static_info`
   - Description: read relatively static world information.
+  - Optional parameter: `source`
+    - `auto`: default.
+    - `chain`: return only fields that can be read directly from chain where possible; indexer-only fields will remain empty.
+    - `indexer`: prefer richer indexer-backed world data.
   - Main returned fields:
+    - `coordinate_convention`
     - `all_npcs`
     - `recipe_catalog`
     - `equipment_catalog`
@@ -68,7 +77,12 @@ The tools are grouped into reads, checks, and writes.
     - `mint_interval_blocks`
 - `agentbox_skills_read_world_dynamic_info`
   - Description: read dynamic world information.
+  - Optional parameter: `source`
+    - `auto`: default.
+    - `chain`: return only fields that can be read directly from chain where possible; for example `current_block` and `current_land` are available, but `nearby_roles`, `nearby_lands`, `lands_with_ground_tokens`, and `last_mint` may be empty because they depend on the indexer.
+    - `indexer`: prefer richer indexer-backed world data.
   - Main returned fields:
+    - `coordinate_convention`
     - `current_block`
     - `current_land`
     - `nearby_roles`
@@ -76,6 +90,7 @@ The tools are grouped into reads, checks, and writes.
     - `lands_with_ground_tokens`
     - `last_mint`
   - Key fields to pay attention to:
+    - `coordinate_convention`
     - `current_block`
     - `current_land`
     - `nearby_roles`
@@ -84,6 +99,10 @@ The tools are grouped into reads, checks, and writes.
     - `last_mint`
 - `agentbox_skills_read_nearby_roles`
   - Description: read nearby role information.
+  - Optional parameter: `source`
+    - `auto`: default.
+    - `chain`: there is currently no pure onchain nearby-role enumeration, so this usually returns an empty list.
+    - `indexer`: return the indexer-backed nearby-role list.
   - Main returned fields:
     - `roleId`
     - `roleWallet`
@@ -94,10 +113,17 @@ The tools are grouped into reads, checks, and writes.
     - `state`
 - `agentbox_skills_read_nearby_lands`
   - Description: read nearby land information.
+  - Optional parameter: `source`
+    - `auto`: default.
+    - `chain`: there is currently no pure onchain nearby-land enumeration, so this usually returns an empty list.
+    - `indexer`: return the indexer-backed nearby-land list.
   - Main returned fields:
+    - `coordinate_convention`
     - `landId`
     - `x`
     - `y`
+    - `coordinate`
+    - `coordinateLabel`
     - `ownerAddress`
     - `landContractAddress`
     - `isResourcePoint`
@@ -108,9 +134,12 @@ The tools are grouped into reads, checks, and writes.
 - `agentbox_skills_read_land`
   - Description: read detailed information for a specific land.
   - Main returned fields:
+    - `coordinate_convention`
     - `landId`
     - `x`
     - `y`
+    - `coordinate`
+    - `coordinateLabel`
     - `ownerAddress`
     - `landContractAddress`
     - `isResourcePoint`
@@ -126,12 +155,16 @@ The tools are grouped into reads, checks, and writes.
     - `block_timestamp`
     - `tx_hash`
     - `decoded_args`
+    - `decoded_land_coordinate`
 - `agentbox_skills_read_lands_with_ground_tokens`
   - Description: read lands with `ground_tokens`.
   - Main returned fields:
+    - `coordinate_convention`
     - `landId`
     - `x`
     - `y`
+    - `coordinate`
+    - `coordinateLabel`
     - `ownerAddress`
     - `landContractAddress`
     - `isResourcePoint`
@@ -139,6 +172,10 @@ The tools are grouped into reads, checks, and writes.
     - `stock`
     - `groundTokens`
     - `updatedAtBlock`
+  - Coordinate convention:
+    - Coordinates are always ordered as `(x, y)`.
+    - `landId` is computed as `landId = y * mapWidth + x`.
+    - Do not infer `x` and `y` by visually splitting the digits of `landId`.
 - `agentbox_skills_read_id_mappings`
   - Description: read the Agentbox ID mappings table so the agent can understand what each game ID means.
   - Main returned fields:
@@ -180,6 +217,19 @@ The tools are grouped into reads, checks, and writes.
   - Description: check crafting prerequisites.
 - `agentbox_skills_check_trigger_mint_prerequisites`
   - Description: check mint prerequisites, including whether the mint interval has elapsed and whether `mintsCount` is still below `maxMintCount`; whether any lands still have `ground_tokens` is returned as strategy-layer information.
+- `agentbox_skills_check_stabilize_prerequisites`
+  - Description: check whether the role currently has unreliable AGC balance worth attempting to stabilize.
+  - Key returned fields:
+    - `canExecute`
+    - `balances.totalBalance`
+    - `balances.unreliableBalance`
+    - `balances.reliableBalance`
+    - `stabilizationBlocks`
+    - `currentBlock`
+    - `reasons`
+  - Notes:
+    - The economy contract exposes only aggregated `unreliableBalance`, not per-bucket maturity timestamps.
+    - So this check answers “does the role currently have unreliable balance worth attempting to stabilize,” not “how much is guaranteed to mature in this exact block.”
 
 ### Planning support
 
@@ -248,3 +298,9 @@ Most onchain actions share the following common conditions:
 - `agentbox_skills_trigger_mint`
   - Description: trigger mint.
   - Usage conditions: a local signer must exist; `mintsCount` must still be below `maxMintCount`; the elapsed block distance from `last_mint.block_number` to `current_block` must be at least `mint_interval_blocks`. Whether any lands still have `ground_tokens` is not a hard onchain precondition for `triggerMint`, though it may still be useful as a strategy-layer signal.
+- `agentbox_skills_stabilize_balance`
+  - Description: attempt to stabilize matured unreliable AGC held by the role wallet.
+  - Usage conditions: a local signer must exist; if the role has a `controller`, the signer must be the `controller`; otherwise the signer must be the `owner`; the role should have `unreliableBalance > 0`, otherwise calling it is not useful.
+  - Notes:
+    - `stabilizeBalance(roleWallet)` is an economy-contract action and does not require the role to be `Idle`.
+    - Because the chain does not expose maturity timestamps for each unreliable-balance bucket, a successful call may stabilize only part of the unreliable balance, or may produce no effective change if nothing is mature yet in the current block.

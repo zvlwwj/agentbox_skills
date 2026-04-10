@@ -9,4 +9,7 @@ The project is intentionally limited to:
 - prerequisite checks
 - lightweight summaries for dialogue planning
 
-Autonomous runtime documents stay with `/Users/jingyizou/auto_agentbox`.
+Useful documents in this directory:
+
+- `AGENTBOX_GAME_INTRO_CN.md`: game overview in Chinese
+- `OPENCLAW_CRON_PROMPT_CN.md`: a ready-to-paste OpenClaw cron prompt template for long-running Agentbox automation

@@ -21,8 +21,10 @@ import {
   TARGET_WALLET,
   UINT,
   ZERO_ADDRESS,
+  buildCoordinateConvention,
   decodeEconomyBalances,
   errorResult,
+  normalizeValue,
   normalizeRoleState,
   obj,
   precheckError,
@@ -43,6 +45,11 @@ function resourceAmounts(me) {
   return out;
 }
 
+function toFiniteNumber(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
 export function buildToolSpecs() {
   return [
     { name: "agentbox.signer.prepare", description: "Create the single local gameplay private key.", parameters: obj({ label: STRING }) },
@@ -51,10 +58,10 @@ export function buildToolSpecs() {
     { name: "agentbox.signer.read", description: "Read the current local signer state.", parameters: obj({}) },
     { name: "agentbox.registration.confirm", description: "Confirm direct registration with the active signer and continue registration.", parameters: obj({ profileMode: PROFILE_MODE, nickname: STRING, gender: UINT }) },
     { name: "agentbox.skills.read_role_snapshot", description: "Read the current role snapshot grouped into staticInfo and dynamicInfo.", parameters: obj({ role: ROLE, source: READ_SOURCE }) },
-    { name: "agentbox.skills.read_world_static_info", description: "Read lower-frequency world facts used for planning.", parameters: obj({ role: ROLE }) },
-    { name: "agentbox.skills.read_world_dynamic_info", description: "Read frequently changing world facts near the current role.", parameters: obj({ role: ROLE }) },
-    { name: "agentbox.skills.read_nearby_roles", description: "Read nearby roles around the current role.", parameters: obj({ role: ROLE }, ["role"]) },
-    { name: "agentbox.skills.read_nearby_lands", description: "Read nearby lands around the current role.", parameters: obj({ role: ROLE }, ["role"]) },
+    { name: "agentbox.skills.read_world_static_info", description: "Read lower-frequency world facts used for planning.", parameters: obj({ role: ROLE, source: READ_SOURCE }) },
+    { name: "agentbox.skills.read_world_dynamic_info", description: "Read frequently changing world facts near the current role.", parameters: obj({ role: ROLE, source: READ_SOURCE }) },
+    { name: "agentbox.skills.read_nearby_roles", description: "Read nearby roles around the current role.", parameters: obj({ role: ROLE, source: READ_SOURCE }, ["role"]) },
+    { name: "agentbox.skills.read_nearby_lands", description: "Read nearby lands around the current role.", parameters: obj({ role: ROLE, source: READ_SOURCE }, ["role"]) },
     { name: "agentbox.skills.read_land", description: "Read one land by landId or coordinate.", parameters: obj({ landId: UINT, x: UINT, y: UINT, source: READ_SOURCE }) },
     { name: "agentbox.skills.read_last_mint", description: "Read the last mint event observed by the indexer.", parameters: obj({}) },
     { name: "agentbox.skills.read_lands_with_ground_tokens", description: "Read all lands that currently have ground tokens.", parameters: obj({}) },
@@ -77,11 +84,13 @@ export function buildToolSpecs() {
     { name: "agentbox.skills.social.global", description: "Send a global message.", parameters: obj({ role: ROLE, message: STRING }, ["role", "message"]) },
     { name: "agentbox.skills.cancel_current_action", description: "Cancel the current cancelable action.", parameters: obj({ role: ROLE }, ["role"]) },
     { name: "agentbox.skills.trigger_mint", description: "Trigger token mint when mint prerequisites are satisfied.", parameters: obj({}) },
+    { name: "agentbox.skills.stabilize_balance", description: "Stabilize matured unreliable AGC for the role wallet.", parameters: obj({ role: ROLE }, ["role"]) },
     { name: "agentbox.skills.check_finishable", description: "Check whether the current action can finish now.", parameters: obj({ role: ROLE }, ["role"]) },
     { name: "agentbox.skills.check_gather_prerequisites", description: "Check whether gathering can start on the current land.", parameters: obj({ role: ROLE, amount: UINT }, ["role", "amount"]) },
     { name: "agentbox.skills.check_learning_prerequisites", description: "Check whether learning from an NPC can start now.", parameters: obj({ role: ROLE, npcId: UINT }, ["role", "npcId"]) },
     { name: "agentbox.skills.check_crafting_prerequisites", description: "Check whether crafting a recipe can start now.", parameters: obj({ role: ROLE, recipeId: UINT }, ["role", "recipeId"]) },
     { name: "agentbox.skills.check_trigger_mint_prerequisites", description: "Check whether the token mint interval has elapsed and no ground tokens remain on the map.", parameters: obj({ role: ROLE }) },
+    { name: "agentbox.skills.check_stabilize_prerequisites", description: "Check whether the role currently has unreliable AGC worth attempting to stabilize.", parameters: obj({ role: ROLE }, ["role"]) },
     { name: "agentbox.skills.summarize_role_state", description: "Summarize the current role state for dialogue planning.", parameters: obj({ role: ROLE }, ["role"]) },
     { name: "agentbox.skills.summarize_world_static_info", description: "Summarize lower-frequency world facts for dialogue planning.", parameters: obj({ role: ROLE }, ["role"]) },
     { name: "agentbox.skills.summarize_world_dynamic_info", description: "Summarize current nearby world dynamics for dialogue planning.", parameters: obj({ role: ROLE }, ["role"]) },
@@ -145,11 +154,11 @@ export class JSPlayerRuntime {
       case "agentbox.signer.export": return this.signerExport();
       case "agentbox.signer.read": return this.signerRead();
       case "agentbox.registration.confirm": return this.registrationConfirm(payload);
-      case "agentbox.skills.read_role_snapshot": return this.readRoleSnapshot(payload.role);
-      case "agentbox.skills.read_world_static_info": return this.readWorldStaticInfo(payload.role);
-      case "agentbox.skills.read_world_dynamic_info": return this.readWorldDynamicInfo(payload.role);
-      case "agentbox.skills.read_nearby_roles": return this.readNearbyRoles(payload.role);
-      case "agentbox.skills.read_nearby_lands": return this.readNearbyLands(payload.role);
+      case "agentbox.skills.read_role_snapshot": return this.readRoleSnapshot(payload.role, payload.source);
+      case "agentbox.skills.read_world_static_info": return this.readWorldStaticInfo(payload.role, payload.source);
+      case "agentbox.skills.read_world_dynamic_info": return this.readWorldDynamicInfo(payload.role, payload.source);
+      case "agentbox.skills.read_nearby_roles": return this.readNearbyRoles(payload.role, payload.source);
+      case "agentbox.skills.read_nearby_lands": return this.readNearbyLands(payload.role, payload.source);
       case "agentbox.skills.read_land": return this.readLand(payload);
       case "agentbox.skills.read_last_mint": return this.readLastMint();
       case "agentbox.skills.read_lands_with_ground_tokens": return this.readLandsWithGroundTokens();
@@ -172,11 +181,13 @@ export class JSPlayerRuntime {
       case "agentbox.skills.social.global": return this.coreWrite(toolName, "sendGlobalMessage", [payload.role, payload.message], "Global message sent", { roleWallet: payload.role });
       case "agentbox.skills.cancel_current_action": return this.cancelCurrentAction(payload.role);
       case "agentbox.skills.trigger_mint": return this.economyWrite(toolName, "triggerMint", [], "Mint trigger submitted");
+      case "agentbox.skills.stabilize_balance": return this.stabilizeBalance(payload.role);
       case "agentbox.skills.check_finishable": return successResult(toolName, "Checked finishability of the current action", { data: await this.checkFinishable(payload.role) });
       case "agentbox.skills.check_gather_prerequisites": return successResult(toolName, "Checked gather prerequisites", { data: await this.checkGatherPrerequisites(payload.role, Number(payload.amount)) });
       case "agentbox.skills.check_learning_prerequisites": return successResult(toolName, "Checked learning prerequisites", { data: await this.checkLearningPrerequisites(payload.role, Number(payload.npcId)) });
       case "agentbox.skills.check_crafting_prerequisites": return successResult(toolName, "Checked crafting prerequisites", { data: await this.checkCraftingPrerequisites(payload.role, Number(payload.recipeId)) });
       case "agentbox.skills.check_trigger_mint_prerequisites": return successResult(toolName, "Checked trigger-mint prerequisites", { data: await this.checkTriggerMintPrerequisites(payload.role) });
+      case "agentbox.skills.check_stabilize_prerequisites": return successResult(toolName, "Checked stabilize-balance prerequisites", { data: await this.checkStabilizePrerequisites(payload.role) });
       case "agentbox.skills.summarize_role_state": return successResult(toolName, "Summarized current role state", { data: await this.summarizeRoleState(payload.role) });
       case "agentbox.skills.summarize_world_static_info": return successResult(toolName, "Summarized world static info", { data: await this.summarizeWorldStaticInfo(payload.role) });
       case "agentbox.skills.summarize_world_dynamic_info": return successResult(toolName, "Summarized world dynamic info", { data: await this.summarizeWorldDynamicInfo(payload.role) });
@@ -393,12 +404,17 @@ export class JSPlayerRuntime {
 
   async readLand(payload, source = "auto") {
     const selected = await this.selectReadSource(source, { indexerSupported: true });
+    let mapWidth = null;
     let data = null;
+    try {
+      const config = (await this.readGlobalConfig(selected)).data;
+      mapWidth = toFiniteNumber(config?.mapWidth);
+    } catch {}
     if (selected === "indexer") {
       try {
         if (payload.landId !== undefined && payload.landId !== null) {
           const item = await this.client.indexer.getLandById(payload.landId);
-          data = {
+          data = this.attachLandCoordinateInfo({
             landId: item.land_id,
             x: item.x,
             y: item.y,
@@ -408,12 +424,12 @@ export class JSPlayerRuntime {
             resourceType: item.resource_type,
             stock: item.stock,
             groundTokens: item.ground_tokens,
-          };
+          });
         } else if (payload.x !== undefined && payload.y !== undefined) {
           const result = await this.client.indexer.getLandByCoordinate(payload.x, payload.y);
           const item = (result.items || [])[0];
           if (!item) throw precheckError("LAND_NOT_FOUND", "Land was not found");
-          data = {
+          data = this.attachLandCoordinateInfo({
             landId: item.land_id,
             x: item.x,
             y: item.y,
@@ -423,14 +439,19 @@ export class JSPlayerRuntime {
             resourceType: item.resource_type,
             stock: item.stock,
             groundTokens: item.ground_tokens,
-          };
+          });
         }
       } catch (error) {
         if (source === "indexer") throw error;
       }
     }
-    if (!data) data = await this.client.getLand(payload);
-    return successResult("agentbox.read.land", "Loaded land snapshot", { data });
+    if (!data) data = this.attachLandCoordinateInfo(await this.client.getLand(payload));
+    return successResult("agentbox.read.land", "Loaded land snapshot", {
+      data: {
+        coordinate_convention: buildCoordinateConvention(mapWidth),
+        ...data,
+      },
+    });
   }
 
   async readActionFinishable(roleWallet) {
@@ -439,8 +460,8 @@ export class JSPlayerRuntime {
     });
   }
 
-  async buildRoleSnapshot(roleWallet) {
-    const me = (await this.readMe(roleWallet, "auto")).data;
+  async buildRoleSnapshot(roleWallet, source = "auto") {
+    const me = (await this.readMe(roleWallet, source)).data;
     const finishable = (await this.readActionFinishable(roleWallet)).data;
     return {
       role: roleWallet,
@@ -461,7 +482,7 @@ export class JSPlayerRuntime {
   }
 
   normalizeLandItem(item) {
-    return {
+    return this.attachLandCoordinateInfo({
       landId: item.land_id,
       x: item.x,
       y: item.y,
@@ -472,6 +493,36 @@ export class JSPlayerRuntime {
       stock: item.stock,
       groundTokens: item.ground_tokens,
       updatedAtBlock: item.updated_at_block,
+    });
+  }
+
+  attachLandCoordinateInfo(item) {
+    if (!item || typeof item !== "object") return item;
+    const x = item.x;
+    const y = item.y;
+    return {
+      ...item,
+      coordinate: x !== undefined && y !== undefined ? { x, y } : null,
+      coordinateLabel: x !== undefined && y !== undefined ? `(${x}, ${y})` : null,
+    };
+  }
+
+  decodeLandIdToCoordinate(landId, mapWidth) {
+    const numericLandId = toFiniteNumber(landId);
+    const numericMapWidth = toFiniteNumber(mapWidth);
+    if (numericLandId === null || numericMapWidth === null || numericMapWidth <= 0) return null;
+    const y = Math.floor(numericLandId / numericMapWidth);
+    const x = numericLandId % numericMapWidth;
+    return { x, y, coordinateLabel: `(${x}, ${y})` };
+  }
+
+  attachLastMintCoordinateInfo(lastMint, mapWidth) {
+    if (!lastMint || typeof lastMint !== "object") return lastMint;
+    const decodedLandCoordinate = this.decodeLandIdToCoordinate(lastMint?.decoded_args?.landId, mapWidth);
+    if (!decodedLandCoordinate) return lastMint;
+    return {
+      ...lastMint,
+      decoded_land_coordinate: decodedLandCoordinate,
     };
   }
 
@@ -489,10 +540,13 @@ export class JSPlayerRuntime {
     return items;
   }
 
-  async buildWorldInfo(roleWallet) {
-    const me = (await this.readMe(roleWallet, "auto")).data;
+  async buildWorldInfo(roleWallet, source = "auto") {
+    const selected = await this.selectReadSource(source, { indexerSupported: true });
+    const me = (await this.readMe(roleWallet, selected)).data;
     const role = me.role || {};
+    let mapWidth = null;
     const worldState = {
+      coordinate_convention: buildCoordinateConvention(),
       available_land_contracts: [],
       current_equipment: [],
       current_equipment_recipes: {},
@@ -510,56 +564,60 @@ export class JSPlayerRuntime {
       max_mint_count: null,
     };
     try {
-      const config = (await this.readGlobalConfig("auto")).data;
+      const config = (await this.readGlobalConfig(selected)).data;
       worldState.mint_interval_blocks = config.mintIntervalBlocks;
       worldState.max_mint_count = config.maxMintCount;
+      mapWidth = toFiniteNumber(config?.mapWidth);
+      worldState.coordinate_convention = buildCoordinateConvention(mapWidth);
     } catch {}
     try {
       worldState.current_block = Number(await this.client.provider.getBlockNumber());
     } catch {}
-    try {
-      const items = (await this.client.indexer.listNpcConfigs()).items || [];
-      worldState.all_npcs = items.map((item) => ({
-        npcId: Number(item.npc_id || 0),
-        x: item.x,
-        y: item.y,
-        skillId: Number(item.skill_id || 0),
-        isTeaching: Boolean(item.is_teaching),
-        studentWallet: item.student_wallet,
-        startBlock: item.start_block,
-      }));
-    } catch {}
-    try {
-      const items = (await this.client.indexer.listRecipeConfigs()).items || [];
-      worldState.recipe_catalog = items.map((item) => ({
-        recipeId: Number(item.recipe_id || 0),
-        requiredResources: [...(item.resource_types || [])],
-        requiredAmounts: [...(item.amounts || [])],
-        requiredSkill: Number(item.skill_id || 0),
-        requiredBlocks: item.required_blocks,
-        outputEquipmentId: Number(item.output_equipment_id || 0),
-        updatedAtBlock: item.updated_at_block,
-      }));
-    } catch {}
-    try {
-      const items = (await this.client.indexer.listEquipmentConfigs()).items || [];
-      worldState.equipment_catalog = Object.fromEntries(items.filter((item) => Number(item.equipment_id || 0) > 0).map((item) => [
-        Number(item.equipment_id || 0),
-        {
-          equipmentId: Number(item.equipment_id || 0),
-          slot: Number(item.slot || 0),
-          speedBonus: item.speed_bonus,
-          attackBonus: item.attack_bonus,
-          defenseBonus: item.defense_bonus,
-          maxHpBonus: item.max_hp_bonus,
-          rangeBonus: item.range_bonus,
+    if (selected !== "chain") {
+      try {
+        const items = (await this.client.indexer.listNpcConfigs()).items || [];
+        worldState.all_npcs = items.map((item) => ({
+          npcId: Number(item.npc_id || 0),
+          x: item.x,
+          y: item.y,
+          skillId: Number(item.skill_id || 0),
+          isTeaching: Boolean(item.is_teaching),
+          studentWallet: item.student_wallet,
+          startBlock: item.start_block,
+        }));
+      } catch {}
+      try {
+        const items = (await this.client.indexer.listRecipeConfigs()).items || [];
+        worldState.recipe_catalog = items.map((item) => ({
+          recipeId: Number(item.recipe_id || 0),
+          requiredResources: [...(item.resource_types || [])],
+          requiredAmounts: [...(item.amounts || [])],
+          requiredSkill: Number(item.skill_id || 0),
+          requiredBlocks: item.required_blocks,
+          outputEquipmentId: Number(item.output_equipment_id || 0),
           updatedAtBlock: item.updated_at_block,
-        },
-      ]));
-    } catch {}
-    try {
-      worldState.all_resource_lands = await this.listLands({ is_resource_point: true });
-    } catch {}
+        }));
+      } catch {}
+      try {
+        const items = (await this.client.indexer.listEquipmentConfigs()).items || [];
+        worldState.equipment_catalog = Object.fromEntries(items.filter((item) => Number(item.equipment_id || 0) > 0).map((item) => [
+          Number(item.equipment_id || 0),
+          {
+            equipmentId: Number(item.equipment_id || 0),
+            slot: Number(item.slot || 0),
+            speedBonus: item.speed_bonus,
+            attackBonus: item.attack_bonus,
+            defenseBonus: item.defense_bonus,
+            maxHpBonus: item.max_hp_bonus,
+            rangeBonus: item.range_bonus,
+            updatedAtBlock: item.updated_at_block,
+          },
+        ]));
+      } catch {}
+      try {
+        worldState.all_resource_lands = await this.listLands({ is_resource_point: true });
+      } catch {}
+    }
     worldState.current_equipment = (me.equipped || []).filter((item) => Number(item.equipmentId || item.equipment_id || 0) > 0).map((item) => ({
       slot: Number(item.slot || 0),
       equipmentId: Number(item.equipmentId || item.equipment_id || 0),
@@ -571,37 +629,46 @@ export class JSPlayerRuntime {
       if (outputId > 0) (recipeByOutput[outputId] ||= []).push(recipe);
     }
     worldState.current_equipment_recipes = Object.fromEntries(worldState.current_equipment.map((item) => [String(item.equipmentId), recipeByOutput[item.equipmentId] || []]));
-    try { worldState.last_mint = (await this.client.indexer.getLastMint()).item || null; } catch {}
-    try { worldState.lands_with_ground_tokens = await this.listLands({ has_ground_tokens: true }); } catch {}
+    if (selected !== "chain") {
+      try { worldState.last_mint = this.attachLastMintCoordinateInfo((await this.client.indexer.getLastMint()).item || null, mapWidth); } catch {}
+      try { worldState.lands_with_ground_tokens = await this.listLands({ has_ground_tokens: true }); } catch {}
+    }
     if (role.x !== undefined && role.y !== undefined) {
-      try { worldState.current_land = (await this.readLand({ x: Number(role.x), y: Number(role.y) }, "auto")).data; } catch {}
-      const bounds = {
-        x_min: Number(role.x) - 100,
-        x_max: Number(role.x) + 100,
-        y_min: Number(role.y) - 100,
-        y_max: Number(role.y) + 100,
-        limit: 200,
-        offset: 0,
-      };
       try {
-        const items = (await this.client.indexer.listRoles(bounds)).items || [];
-        worldState.nearby_roles = items.filter((item) => String(item.role_wallet || "").toLowerCase() !== String(roleWallet).toLowerCase()).map((item) => ({
-          roleId: item.role_id,
-          roleWallet: item.role_wallet,
-          ownerAddress: item.owner_address,
-          controllerAddress: item.controller_address,
-          x: (item.position || {}).x,
-          y: (item.position || {}).y,
-          state: item.state,
-        }));
+        const currentLandData = (await this.readLand({ x: Number(role.x), y: Number(role.y) }, selected)).data || {};
+        const { coordinate_convention: _coordinateConvention, ...currentLand } = currentLandData;
+        worldState.current_land = currentLand;
       } catch {}
-      try {
-        const items = (await this.client.indexer.listLands(bounds)).items || [];
-        worldState.nearby_lands = items.map((item) => this.normalizeLandItem(item));
-      } catch {}
+      if (selected !== "chain") {
+        const bounds = {
+          x_min: Number(role.x) - 100,
+          x_max: Number(role.x) + 100,
+          y_min: Number(role.y) - 100,
+          y_max: Number(role.y) + 100,
+          limit: 200,
+          offset: 0,
+        };
+        try {
+          const items = (await this.client.indexer.listRoles(bounds)).items || [];
+          worldState.nearby_roles = items.filter((item) => String(item.role_wallet || "").toLowerCase() !== String(roleWallet).toLowerCase()).map((item) => ({
+            roleId: item.role_id,
+            roleWallet: item.role_wallet,
+            ownerAddress: item.owner_address,
+            controllerAddress: item.controller_address,
+            x: (item.position || {}).x,
+            y: (item.position || {}).y,
+            state: item.state,
+          }));
+        } catch {}
+        try {
+          const items = (await this.client.indexer.listLands(bounds)).items || [];
+          worldState.nearby_lands = items.map((item) => this.normalizeLandItem(item));
+        } catch {}
+      }
     }
     return {
       staticInfo: {
+        coordinate_convention: worldState.coordinate_convention,
         all_npcs: worldState.all_npcs,
         recipe_catalog: worldState.recipe_catalog,
         equipment_catalog: worldState.equipment_catalog,
@@ -613,6 +680,7 @@ export class JSPlayerRuntime {
         max_mint_count: worldState.max_mint_count,
       },
       dynamicInfo: {
+        coordinate_convention: worldState.coordinate_convention,
         current_block: worldState.current_block,
         current_land: worldState.current_land,
         nearby_roles: worldState.nearby_roles,
@@ -623,40 +691,60 @@ export class JSPlayerRuntime {
     };
   }
 
-  async readRoleSnapshot(roleWallet) {
+  async readRoleSnapshot(roleWallet, source = "auto") {
     return successResult("agentbox.skills.read_role_snapshot", "Loaded role snapshot grouped into staticInfo and dynamicInfo", {
-      data: await this.buildRoleSnapshot(roleWallet),
+      data: await this.buildRoleSnapshot(roleWallet, source),
     });
   }
 
-  async readWorldStaticInfo(roleWallet) {
-    const payload = await this.buildWorldInfo(roleWallet);
+  async readWorldStaticInfo(roleWallet, source = "auto") {
+    const payload = await this.buildWorldInfo(roleWallet, source);
     return successResult("agentbox.skills.read_world_static_info", "Loaded world static info", { data: payload.staticInfo || {} });
   }
 
-  async readWorldDynamicInfo(roleWallet) {
-    const payload = await this.buildWorldInfo(roleWallet);
+  async readWorldDynamicInfo(roleWallet, source = "auto") {
+    const payload = await this.buildWorldInfo(roleWallet, source);
     return successResult("agentbox.skills.read_world_dynamic_info", "Loaded world dynamic info", { data: payload.dynamicInfo || {} });
   }
 
-  async readNearbyRoles(roleWallet) {
-    const payload = await this.buildWorldInfo(roleWallet);
+  async readNearbyRoles(roleWallet, source = "auto") {
+    const payload = await this.buildWorldInfo(roleWallet, source);
     return successResult("agentbox.skills.read_nearby_roles", "Loaded nearby roles", { data: { items: payload.dynamicInfo?.nearby_roles || [] } });
   }
 
-  async readNearbyLands(roleWallet) {
-    const payload = await this.buildWorldInfo(roleWallet);
-    return successResult("agentbox.skills.read_nearby_lands", "Loaded nearby lands", { data: { items: payload.dynamicInfo?.nearby_lands || [] } });
+  async readNearbyLands(roleWallet, source = "auto") {
+    const payload = await this.buildWorldInfo(roleWallet, source);
+    return successResult("agentbox.skills.read_nearby_lands", "Loaded nearby lands", {
+      data: {
+        coordinate_convention: payload.dynamicInfo?.coordinate_convention || buildCoordinateConvention(),
+        items: payload.dynamicInfo?.nearby_lands || [],
+      },
+    });
   }
 
   async readLastMint() {
     const payload = await this.client.indexer.getLastMint();
-    return successResult("agentbox.skills.read_last_mint", "Loaded last mint event from the indexer", { data: payload.item });
+    let mapWidth = null;
+    try {
+      const config = (await this.readGlobalConfig("auto")).data;
+      mapWidth = toFiniteNumber(config?.mapWidth);
+    } catch {}
+    return successResult("agentbox.skills.read_last_mint", "Loaded last mint event from the indexer", {
+      data: this.attachLastMintCoordinateInfo(payload.item, mapWidth),
+    });
   }
 
   async readLandsWithGroundTokens() {
+    let mapWidth = null;
+    try {
+      const config = (await this.readGlobalConfig("auto")).data;
+      mapWidth = toFiniteNumber(config?.mapWidth);
+    } catch {}
     return successResult("agentbox.skills.read_lands_with_ground_tokens", "Loaded lands with ground tokens from the indexer", {
-      data: { items: await this.listLands({ has_ground_tokens: true }) },
+      data: {
+        coordinate_convention: buildCoordinateConvention(mapWidth),
+        items: await this.listLands({ has_ground_tokens: true }),
+      },
     });
   }
 
@@ -732,20 +820,44 @@ export class JSPlayerRuntime {
     return successResult(action, summary, { data, txHash: tx.txHash, chainId: this.settings.chainId, blockNumber: tx.blockNumber });
   }
 
-  async economyWrite(action, method, args, summary) {
+  async economyWrite(action, method, args, summary, { roleWallet } = {}) {
     const { wallet } = this.requireActiveSigner();
+    const data = {};
+    if (roleWallet) Object.assign(data, await this.validateOwnerOrController(roleWallet, wallet.address));
     const tx = await this.client.sendTransaction(this.client.economy, method, args, wallet);
-    return successResult(action, summary, { data: {}, txHash: tx.txHash, chainId: this.settings.chainId, blockNumber: tx.blockNumber });
+    return successResult(action, summary, { data, txHash: tx.txHash, chainId: this.settings.chainId, blockNumber: tx.blockNumber });
   }
 
   async finishCurrentAction(roleWallet) {
-    const finishable = (await this.readActionFinishable(roleWallet)).data;
+    const chainMe = (await this.readMe(roleWallet, "chain")).data;
+    const chainRoleState = normalizeRoleState(chainMe.role?.state);
+    const finishable = await this.client.canFinishCurrentAction(roleWallet);
     const state = normalizeRoleState(finishable.state);
+
+    if (chainRoleState !== state) {
+      throw precheckError("CHAIN_STATE_CHANGED", "Chain role state no longer matches the finishable state", {
+        chainRoleState,
+        finishableState: state,
+        finishBlock: finishable.finishBlock,
+      });
+    }
+
+    if (!finishable.canFinish) {
+      throw precheckError("ACTION_NOT_FINISHABLE", "Current action cannot be finished yet", {
+        state,
+        finishBlock: finishable.finishBlock,
+      });
+    }
+
     if (state === ROLE_STATE_LEARNING) return this.learnFinish(roleWallet);
     if (state === ROLE_STATE_CRAFTING) return this.coreWrite("agentbox.skills.craft.finish", "finishCrafting", [roleWallet], "Crafting completed", { roleWallet, allowedStates: new Set([ROLE_STATE_CRAFTING]), finishable: true });
     if (state === ROLE_STATE_GATHERING) return this.coreWrite("agentbox.skills.gather.finish", "finishGather", [roleWallet], "Gathering completed", { roleWallet, allowedStates: new Set([ROLE_STATE_GATHERING]), finishable: true });
     if (state === ROLE_STATE_TELEPORTING) return this.coreWrite("agentbox.skills.teleport.finish", "finishTeleport", [roleWallet], "Teleport completed", { roleWallet, allowedStates: new Set([ROLE_STATE_TELEPORTING]), finishable: true });
-    throw precheckError("FINISH_NOT_SUPPORTED", "Current finishable state is not mapped to a finish action", { state });
+    throw precheckError("FINISH_NOT_SUPPORTED", "Current finishable state is not mapped to a finish action", {
+      state,
+      chainRoleState,
+      finishBlock: finishable.finishBlock,
+    });
   }
 
   async learnFinish(roleWallet) {
@@ -759,15 +871,34 @@ export class JSPlayerRuntime {
   }
 
   async cancelCurrentAction(roleWallet) {
-    const me = (await this.readMe(roleWallet, "auto")).data;
+    const me = (await this.readMe(roleWallet, "chain")).data;
     const state = normalizeRoleState(me.role?.state);
     if (state === ROLE_STATE_LEARNING) return this.coreWrite("agentbox.skills.learn.cancel", "cancelLearning", [roleWallet], "Learning cancelled", { roleWallet, allowedStates: new Set([ROLE_STATE_LEARNING]) });
     if (state === ROLE_STATE_TEACHING) return this.coreWrite("agentbox.skills.teach.cancel", "cancelTeaching", [roleWallet], "Teaching cancelled", { roleWallet, allowedStates: new Set([ROLE_STATE_TEACHING]) });
     throw precheckError("CANCEL_NOT_SUPPORTED", "Current state does not support cancel", { state });
   }
 
+  async stabilizeBalance(roleWallet) {
+    const check = await this.checkStabilizePrerequisites(roleWallet);
+    if (!check.canExecute) {
+      throw precheckError("NO_STABILIZABLE_BALANCE", "Role does not currently have unreliable balance worth attempting to stabilize", {
+        reasons: check.reasons,
+        balances: check.balances,
+        stabilizationBlocks: check.stabilizationBlocks,
+        currentBlock: check.currentBlock,
+      });
+    }
+    return this.economyWrite(
+      "agentbox.skills.stabilize_balance",
+      "stabilizeBalance",
+      [roleWallet],
+      "Stabilize balance transaction submitted",
+      { roleWallet },
+    );
+  }
+
   async checkFinishable(roleWallet) {
-    const me = (await this.readMe(roleWallet, "auto")).data;
+    const me = (await this.readMe(roleWallet, "chain")).data;
     const finishable = (await this.readActionFinishable(roleWallet)).data;
     return {
       role: roleWallet,
@@ -779,9 +910,13 @@ export class JSPlayerRuntime {
   }
 
   async checkGatherPrerequisites(roleWallet, amount) {
-    const me = (await this.readMe(roleWallet, "auto")).data;
-    const world = await this.buildWorldInfo(roleWallet);
-    const currentLand = world.dynamicInfo?.current_land || {};
+    const me = (await this.readMe(roleWallet, "chain")).data;
+    let currentLand = {};
+    if (me.role?.x !== undefined && me.role?.y !== undefined) {
+      try {
+        currentLand = (await this.readLand({ x: Number(me.role.x), y: Number(me.role.y) }, "chain")).data || {};
+      } catch {}
+    }
     const learned = learnedSkillIds(me);
     const resourceType = Number(currentLand.resourceType || 0);
     const requestedAmount = Number(amount || 0);
@@ -813,7 +948,7 @@ export class JSPlayerRuntime {
   }
 
   async checkLearningPrerequisites(roleWallet, npcId) {
-    const me = (await this.readMe(roleWallet, "auto")).data;
+    const me = (await this.readMe(roleWallet, "chain")).data;
     const learned = learnedSkillIds(me);
     let npc = null;
     try {
@@ -845,7 +980,7 @@ export class JSPlayerRuntime {
   }
 
   async checkCraftingPrerequisites(roleWallet, recipeId) {
-    const me = (await this.readMe(roleWallet, "auto")).data;
+    const me = (await this.readMe(roleWallet, "chain")).data;
     const world = await this.buildWorldInfo(roleWallet);
     const recipe = (world.staticInfo?.recipe_catalog || []).find((item) => Number(item.recipeId || 0) === recipeId) || null;
     const learned = learnedSkillIds(me);
@@ -898,6 +1033,40 @@ export class JSPlayerRuntime {
       mintsCount,
       lastMint,
       landsWithGroundTokensCount: landsWithGroundTokens.length,
+      reasons,
+    };
+  }
+
+  async checkStabilizePrerequisites(roleWallet) {
+    const me = (await this.readMe(roleWallet, "chain")).data;
+    let currentBlock = null;
+    let stabilizationBlocks = null;
+    try {
+      currentBlock = Number(await this.client.provider.getBlockNumber());
+    } catch {}
+    try {
+      const config = (await this.readGlobalConfig("chain")).data;
+      stabilizationBlocks = Number(config?.stabilizationBlocks ?? 0) || 0;
+    } catch {}
+
+    const balances = {
+      totalBalance: String(me.balances?.totalBalance ?? "0"),
+      unreliableBalance: String(me.balances?.unreliableBalance ?? "0"),
+      reliableBalance: String(me.balances?.reliableBalance ?? "0"),
+    };
+    const unreliableBalance = BigInt(balances.unreliableBalance || "0");
+    const canExecute = unreliableBalance > 0n;
+    const reasons = [];
+    if (unreliableBalance <= 0n) reasons.push("no_unreliable_balance");
+
+    return {
+      role: roleWallet,
+      canExecute,
+      balances,
+      currentBlock,
+      stabilizationBlocks,
+      exactMaturedAmountUnavailable: true,
+      note: "The economy contract exposes aggregate unreliable balance, but not per-bucket maturity timestamps. This check tells you whether the role has unreliable AGC worth attempting to stabilize; the exact matured amount is determined onchain during stabilizeBalance.",
       reasons,
     };
   }
