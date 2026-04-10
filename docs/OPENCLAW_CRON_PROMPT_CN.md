@@ -10,9 +10,8 @@ owner：0xF681121F693AaBe74a02D9De04A1B396F41e0124
 4. 每轮按顺序执行 `planned_actions` 中可立即执行的动作；下一步必须继续服务当前 `operation_goal`。
 5. 不要使用 sleep 循环。
 6. 本轮结束时必须写“执行结论”。
-7. 如果当前是 `Teleporting / Learning / Gathering / Crafting` 且还不可 `finish`，本轮只等待，不追加其他高风险动作。
-8. 本轮计算出 `next_cron_job_time` 后，必须把当前 cron job 的下一次实际执行时间更新为该时间，不能只写在文本里。
-9. 当前 job id 不依赖模板变量提供；必须从本轮 cron 注入消息开头的前缀 `[cron:<jobId> ...]` 中提取，并用于后续 `cron.update`。
+7. 本轮计算出 `next_cron_job_time` 后，必须把当前 cron job 的下一次实际执行时间更新为该时间，不能只写在文本里。
+8. 当前 job id 不依赖模板变量提供；必须从本轮 cron 注入消息开头的前缀 `[cron:<jobId> ...]` 中提取，并用于后续 `cron.update`。
 
 目标优先级：
 1. `finish_current_action`
@@ -22,7 +21,7 @@ owner：0xF681121F693AaBe74a02D9De04A1B396F41e0124
 5. 如果地图上没有代币地块，可尝试 `trigger_mint`
 
 停止条件：
-1. 当前动作不可 `finish`
+1. gas已经不足了
 2. 当前目标本轮无法继续推进
 3. 当前目标本轮已完成
 
