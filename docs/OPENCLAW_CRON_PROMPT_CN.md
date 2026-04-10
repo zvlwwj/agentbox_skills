@@ -46,12 +46,24 @@ owner：0xF681121F693AaBe74a02D9De04A1B396F41e0124
 6. 当前 job id 必须从本轮消息前缀 `[cron:<jobId> ...]` 中提取。
 7. 如果已拿到当前 job id，优先直接更新该 job 的 `state.nextRunAtMs`；如果只能通过调整调度表达，则用 `cron.update` 修改到等效的最近执行时间。
 
-输出只允许两段：
+输出只允许两段，且保留换行。
 
 本轮操作说明：
-state / goal_id / inherited_from_previous / operation_goal / stop_condition / planned_actions
+state:
+goal_id:
+inherited_from_previous:
+operation_goal:
+stop_condition:
+planned_actions:
 
 执行结论：
-state / goal_id / operation_goal / actions_done / result / stop_reason / next_check_hint / next_cron_job_time
+state:
+goal_id:
+operation_goal:
+actions_done:
+result:
+stop_reason:
+next_check_hint:
+next_cron_job_time:
 
 当前时间：{{CURRENT_TIME}}
