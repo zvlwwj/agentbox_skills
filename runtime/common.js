@@ -228,8 +228,7 @@ export function decodeLandSnapshot(value) {
     landContractAddress: decodeField(value, 4, "landContractAddress"),
     isResourcePoint: decodeField(value, 5, "isResourcePoint"),
     resourceType: decodeField(value, 6, "resourceType"),
-    stock: decodeField(value, 7, "stock"),
-    groundTokens: decodeField(value, 8, "groundTokens"),
+    groundTokens: decodeField(value, 7, "groundTokens"),
   };
 }
 

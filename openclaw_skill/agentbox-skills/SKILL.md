@@ -40,23 +40,13 @@ The tools are grouped into reads, checks, and writes.
     - `auto`: default, prefer indexer and fall back to chain.
     - `chain`: force pure onchain role data; useful when verifying whether state has actually changed.
     - `indexer`: force indexer-backed reads.
-  - Main returned fields:
-    - `staticInfo.identity`
-    - `staticInfo.skills`
-    - `staticInfo.equipped`
-    - `staticInfo.ownedUnequippedEquipments`
-    - `dynamicInfo.role`
-    - `dynamicInfo.action`
-    - `dynamicInfo.balances`
-    - `dynamicInfo.resourceBalances`
-    - `dynamicInfo.finishable`
-  - Key fields to pay attention to:
+  - Core returned structure:
+    - `staticInfo`
+    - `dynamicInfo`
+  - Focus on:
     - `dynamicInfo.role.state`
     - `dynamicInfo.role.x`
     - `dynamicInfo.role.y`
-    - `dynamicInfo.role.speed`
-    - `dynamicInfo.role.hp`
-    - `dynamicInfo.role.range`
     - `dynamicInfo.action`
     - `dynamicInfo.finishable.canFinish`
 - `agentbox_skills_read_world_static_info`
@@ -65,129 +55,72 @@ The tools are grouped into reads, checks, and writes.
     - `auto`: default.
     - `chain`: return only fields that can be read directly from chain where possible; indexer-only fields will remain empty.
     - `indexer`: prefer richer indexer-backed world data.
-  - Main returned fields:
-    - `coordinate_convention`
-    - `all_npcs`
-    - `recipe_catalog`
-    - `equipment_catalog`
-    - `all_resource_lands`
-    - `current_equipment`
-    - `current_equipment_recipes`
-    - `available_land_contracts`
-    - `mint_interval_blocks`
+  - Core returned structure:
+    - world coordinate convention and base config
+    - NPC, recipe, equipment, and resource-land catalogs
+    - current equipment and related crafting paths
 - `agentbox_skills_read_world_dynamic_info`
   - Description: read dynamic world information.
   - Optional parameter: `source`
     - `auto`: default.
     - `chain`: return only fields that can be read directly from chain where possible; for example `current_block` and `current_land` are available, but `nearby_roles`, `nearby_lands`, `lands_with_ground_tokens`, and `last_mint` may be empty because they depend on the indexer.
     - `indexer`: prefer richer indexer-backed world data.
-  - Main returned fields:
-    - `coordinate_convention`
+  - Core returned structure:
+    - current block and current land
+    - nearby roles and nearby lands
+    - ground-AGC and recent mint signals
+  - Focus on:
     - `current_block`
     - `current_land`
     - `nearby_roles`
-    - `nearby_lands`
     - `lands_with_ground_tokens`
-    - `last_mint`
-  - Key fields to pay attention to:
-    - `coordinate_convention`
-    - `current_block`
-    - `current_land`
-    - `nearby_roles`
-    - `nearby_lands`
-    - `lands_with_ground_tokens`
-    - `last_mint`
 - `agentbox_skills_read_nearby_roles`
   - Description: read nearby role information.
   - Optional parameter: `source`
     - `auto`: default.
     - `chain`: there is currently no pure onchain nearby-role enumeration, so this usually returns an empty list.
     - `indexer`: return the indexer-backed nearby-role list.
-  - Main returned fields:
-    - `roleId`
-    - `roleWallet`
-    - `ownerAddress`
-    - `controllerAddress`
-    - `x`
-    - `y`
-    - `state`
+  - Core returned structure:
+    - nearby role identity
+    - coordinates
+    - current state
 - `agentbox_skills_read_nearby_lands`
   - Description: read nearby land information.
   - Optional parameter: `source`
     - `auto`: default.
     - `chain`: there is currently no pure onchain nearby-land enumeration, so this usually returns an empty list.
     - `indexer`: return the indexer-backed nearby-land list.
-  - Main returned fields:
-    - `coordinate_convention`
-    - `landId`
-    - `x`
-    - `y`
-    - `coordinate`
-    - `coordinateLabel`
-    - `ownerAddress`
-    - `landContractAddress`
-    - `isResourcePoint`
-    - `resourceType`
-    - `stock`
-    - `groundTokens`
-    - `updatedAtBlock`
+  - Core returned structure:
+    - coordinate information
+    - ownership and land configuration
+    - resource-point and ground-AGC information
 - `agentbox_skills_read_land`
   - Description: read detailed information for a specific land.
-  - Main returned fields:
-    - `coordinate_convention`
-    - `landId`
-    - `x`
-    - `y`
-    - `coordinate`
-    - `coordinateLabel`
-    - `ownerAddress`
-    - `landContractAddress`
-    - `isResourcePoint`
-    - `resourceType`
-    - `stock`
-    - `groundTokens`
-    - `updatedAtBlock`
+  - Core returned structure:
+    - coordinate information
+    - ownership and land configuration
+    - resource-point and ground-AGC information
 - `agentbox_skills_read_last_mint`
   - Description: read the latest mint information.
-  - Main returned fields:
-    - `event_name`
-    - `block_number`
-    - `block_timestamp`
-    - `tx_hash`
-    - `decoded_args`
-    - `decoded_land_coordinate`
+  - Core returned structure:
+    - event metadata
+    - decoded mint arguments
+    - decoded mint coordinates
 - `agentbox_skills_read_lands_with_ground_tokens`
   - Description: read lands with `ground_tokens`.
-  - Main returned fields:
-    - `coordinate_convention`
-    - `landId`
-    - `x`
-    - `y`
-    - `coordinate`
-    - `coordinateLabel`
-    - `ownerAddress`
-    - `landContractAddress`
-    - `isResourcePoint`
-    - `resourceType`
-    - `stock`
-    - `groundTokens`
-    - `updatedAtBlock`
+  - Core returned structure:
+    - coordinate information
+    - ownership and land configuration
+    - ground-AGC information
   - Coordinate convention:
     - Coordinates are always ordered as `(x, y)`.
     - `landId` is computed as `landId = y * mapWidth + x`.
     - Do not infer `x` and `y` by visually splitting the digits of `landId`.
 - `agentbox_skills_read_id_mappings`
   - Description: read the Agentbox ID mappings table so the agent can understand what each game ID means.
-  - Main returned fields:
-    - `skills`
-    - `resources`
-    - `roleStates`
-    - `actionTypes`
-    - `equipmentSlots`
-    - `equipments`
-    - `recipes`
-    - `npcs`
-    - `resourcePoints`
+  - Core returned structure:
+    - skill, resource, state, and action mappings
+    - slot, equipment, recipe, NPC, and resource-point mappings
   - Example uses:
     - Use `skills` to know that skill `1` means wood gathering.
     - Use `resources` to know that resource `1` means wood.
@@ -195,22 +128,17 @@ The tools are grouped into reads, checks, and writes.
     - Use `equipmentSlots` to know that slot `1` means weapon.
 - `agentbox_skills_read_global_config`
   - Description: read global configuration.
-  - Main returned fields:
-    - `mapWidth`
-    - `mapHeight`
-    - `mintIntervalBlocks`
-    - `mintAmount`
-    - `stabilizationBlocks`
-    - `craftDurationBlocks`
-    - `halvingIntervalBlocks`
-    - `landPrice`
+  - Core returned structure:
+    - map dimensions
+    - timing config for mint, stabilization, and crafting
+    - economy config such as land price
 
 ### Prerequisite checks
 
 - `agentbox_skills_check_finishable`
   - Description: check whether the current action can be finished.
 - `agentbox_skills_check_gather_prerequisites`
-  - Description: check gather prerequisites, including whether the role is `Idle`, whether the current land is a resource point, whether the matching skill is learned, and whether the requested gather amount fits the current stock.
+  - Description: check gather prerequisites, including whether the role is `Idle`, whether the current land is a resource point, whether the matching skill is learned, and whether the requested gather amount is positive.
 - `agentbox_skills_check_learning_prerequisites`
   - Description: check learning prerequisites, including whether the role is `Idle`, whether it is exactly on the NPC position, whether the NPC is idle, and whether the target skill is configured and not yet learned.
 - `agentbox_skills_check_crafting_prerequisites`
@@ -219,14 +147,11 @@ The tools are grouped into reads, checks, and writes.
   - Description: check mint prerequisites, including whether the mint interval has elapsed and whether `mintsCount` is still below `maxMintCount`; whether any lands still have `ground_tokens` is returned as strategy-layer information.
 - `agentbox_skills_check_stabilize_prerequisites`
   - Description: check whether the role currently has unreliable AGC balance worth attempting to stabilize.
-  - Key returned fields:
-    - `canExecute`
-    - `balances.totalBalance`
-    - `balances.unreliableBalance`
-    - `balances.reliableBalance`
-    - `stabilizationBlocks`
-    - `currentBlock`
-    - `reasons`
+  - Core returned structure:
+    - whether execution is possible
+    - current balance breakdown
+    - stabilization timing information
+    - failure reasons
   - Notes:
     - The economy contract exposes only aggregated `unreliableBalance`, not per-bucket maturity timestamps.
     - So this check answers “does the role currently have unreliable balance worth attempting to stabilize,” not “how much is guaranteed to mature in this exact block.”
@@ -258,7 +183,7 @@ Most onchain actions share the following common conditions:
   - Usage conditions: `finishable.canFinish` must be true; the current role state must be one of the supported finish states mapped by the skill: `Learning`, `Crafting`, `Gathering`, or `Teleporting`; for `Learning`, the finish action follows the dedicated onchain `finishLearning` rules rather than the usual owner/controller permission gate.
 - `agentbox_skills_gather_start`
   - Description: start gathering.
-  - Usage conditions: the role must currently be `Idle`; the role must already be standing on the current resource land; the current land must be a resource point with stock remaining; the land's `resourceType` must correspond to a learned skill.
+  - Usage conditions: the role must currently be `Idle`; the role must already be standing on the current resource land; the current land must be a resource point; the land's `resourceType` must correspond to a learned skill.
 - `agentbox_skills_learn_npc_start`
   - Description: start learning from an NPC.
   - Usage conditions: the role must currently be `Idle`; the role must be at the NPC's exact coordinate; the NPC must exist; the NPC must not currently be teaching; the NPC's target skill must have configured required learning blocks; the target skill must not already be learned.
@@ -304,3 +229,9 @@ Most onchain actions share the following common conditions:
   - Notes:
     - `stabilizeBalance(roleWallet)` is an economy-contract action and does not require the role to be `Idle`.
     - Because the chain does not expose maturity timestamps for each unreliable-balance bucket, a successful call may stabilize only part of the unreliable balance, or may produce no effective change if nothing is mature yet in the current block.
+- `agentbox_skills_transfer_agc_to_owner`
+  - Description: transfer stabilized, spendable AGC from the role wallet back to the current owner address.
+  - Usage conditions: a local signer must exist; if the role has a `controller`, the signer must be the `controller`; otherwise the signer must be the `owner`; `amount` must be greater than `0`; the role wallet must currently have enough `reliableBalance`.
+  - Notes:
+    - This action uses `AgentboxRoleWallet.execute(...)` so that the role wallet calls the economy contract's ERC20 `transfer(owner, amount)`.
+    - Only stabilized, spendable reliable AGC can be transferred out; unreliable AGC cannot be transferred directly.

@@ -261,7 +261,12 @@ export class AgentboxClient {
     this.economy = new ethers.Contract(settings.economyAddress, abiFromFile(path.join(abiDir, "AgentboxEconomy.json")), this.provider);
     this.config = new ethers.Contract(settings.configAddress, abiFromFile(path.join(abiDir, "AgentboxConfig.json")), this.provider);
     this.resource = new ethers.Contract(settings.resourceAddress, abiFromFile(path.join(abiDir, "AgentboxResource.json")), this.provider);
+    this.roleWalletAbi = abiFromFile(path.join(abiDir, "AgentboxRoleWallet.json"));
     this.indexer = new IndexerClient(settings.indexerBaseUrl, settings.indexerTimeoutMs);
+  }
+
+  roleWalletContract(roleWalletAddress) {
+    return new ethers.Contract(roleWalletAddress, this.roleWalletAbi, this.provider);
   }
 
   async chainId() {

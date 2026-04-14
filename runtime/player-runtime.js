@@ -85,6 +85,7 @@ export function buildToolSpecs() {
     { name: "agentbox.skills.cancel_current_action", description: "Cancel the current cancelable action.", parameters: obj({ role: ROLE }, ["role"]) },
     { name: "agentbox.skills.trigger_mint", description: "Trigger token mint when mint prerequisites are satisfied.", parameters: obj({}) },
     { name: "agentbox.skills.stabilize_balance", description: "Stabilize matured unreliable AGC for the role wallet.", parameters: obj({ role: ROLE }, ["role"]) },
+    { name: "agentbox.skills.transfer_agc_to_owner", description: "Transfer reliable AGC from the role wallet back to the current owner address.", parameters: obj({ role: ROLE, amount: UINT }, ["role", "amount"]) },
     { name: "agentbox.skills.check_finishable", description: "Check whether the current action can finish now.", parameters: obj({ role: ROLE }, ["role"]) },
     { name: "agentbox.skills.check_gather_prerequisites", description: "Check whether gathering can start on the current land.", parameters: obj({ role: ROLE, amount: UINT }, ["role", "amount"]) },
     { name: "agentbox.skills.check_learning_prerequisites", description: "Check whether learning from an NPC can start now.", parameters: obj({ role: ROLE, npcId: UINT }, ["role", "npcId"]) },
@@ -182,6 +183,7 @@ export class JSPlayerRuntime {
       case "agentbox.skills.cancel_current_action": return this.cancelCurrentAction(payload.role);
       case "agentbox.skills.trigger_mint": return this.economyWrite(toolName, "triggerMint", [], "Mint trigger submitted");
       case "agentbox.skills.stabilize_balance": return this.stabilizeBalance(payload.role);
+      case "agentbox.skills.transfer_agc_to_owner": return this.transferAgcToOwner(payload.role, Number(payload.amount));
       case "agentbox.skills.check_finishable": return successResult(toolName, "Checked finishability of the current action", { data: await this.checkFinishable(payload.role) });
       case "agentbox.skills.check_gather_prerequisites": return successResult(toolName, "Checked gather prerequisites", { data: await this.checkGatherPrerequisites(payload.role, Number(payload.amount)) });
       case "agentbox.skills.check_learning_prerequisites": return successResult(toolName, "Checked learning prerequisites", { data: await this.checkLearningPrerequisites(payload.role, Number(payload.npcId)) });
@@ -422,7 +424,6 @@ export class JSPlayerRuntime {
             landContractAddress: item.land_contract_address,
             isResourcePoint: item.is_resource_point,
             resourceType: item.resource_type,
-            stock: item.stock,
             groundTokens: item.ground_tokens,
           });
         } else if (payload.x !== undefined && payload.y !== undefined) {
@@ -437,7 +438,6 @@ export class JSPlayerRuntime {
             landContractAddress: item.land_contract_address,
             isResourcePoint: item.is_resource_point,
             resourceType: item.resource_type,
-            stock: item.stock,
             groundTokens: item.ground_tokens,
           });
         }
@@ -490,7 +490,6 @@ export class JSPlayerRuntime {
       landContractAddress: item.land_contract_address,
       isResourcePoint: item.is_resource_point,
       resourceType: item.resource_type,
-      stock: item.stock,
       groundTokens: item.ground_tokens,
       updatedAtBlock: item.updated_at_block,
     });
@@ -897,6 +896,53 @@ export class JSPlayerRuntime {
     );
   }
 
+  async transferAgcToOwner(roleWallet, amount) {
+    const requestedAmount = Number(amount || 0);
+    if (!(requestedAmount > 0)) {
+      throw precheckError("INVALID_AMOUNT", "Amount must be a positive integer", { amount });
+    }
+
+    const { wallet } = this.requireActiveSigner();
+    const permission = await this.validateOwnerOrController(roleWallet, wallet.address);
+    const balances = await this.client.getEconomyBalances(roleWallet);
+    const reliableBalance = BigInt(balances.reliableBalance || 0);
+    const transferAmount = BigInt(requestedAmount);
+
+    if (reliableBalance < transferAmount) {
+      throw precheckError("INSUFFICIENT_RELIABLE_BALANCE", "Role wallet does not have enough reliable AGC to transfer", {
+        requestedAmount,
+        reliableBalance: reliableBalance.toString(),
+        owner: permission.owner,
+      });
+    }
+
+    const roleWalletContract = this.client.roleWalletContract(roleWallet);
+    const transferData = this.client.economy.interface.encodeFunctionData("transfer", [permission.owner, transferAmount]);
+    const tx = await this.client.sendTransaction(
+      roleWalletContract,
+      "execute",
+      [this.settings.economyAddress, 0, transferData],
+      wallet,
+    );
+
+    return successResult("agentbox.skills.transfer_agc_to_owner", "Reliable AGC transfer to owner submitted", {
+      data: {
+        ...permission,
+        amount: requestedAmount,
+        token: "AGC",
+        destination: permission.owner,
+        balances: {
+          totalBalance: balances.totalBalance,
+          reliableBalance: balances.reliableBalance,
+          unreliableBalance: balances.unreliableBalance,
+        },
+      },
+      txHash: tx.txHash,
+      chainId: this.settings.chainId,
+      blockNumber: tx.blockNumber,
+    });
+  }
+
   async checkFinishable(roleWallet) {
     const me = (await this.readMe(roleWallet, "chain")).data;
     const finishable = (await this.readActionFinishable(roleWallet)).data;
@@ -920,22 +966,17 @@ export class JSPlayerRuntime {
     const learned = learnedSkillIds(me);
     const resourceType = Number(currentLand.resourceType || 0);
     const requestedAmount = Number(amount || 0);
-    const currentStock = Number(currentLand.stock || 0);
     const canExecute = Boolean(currentLand.isResourcePoint)
-      && currentStock > 0
       && normalizeRoleState(me.role?.state) === ROLE_STATE_IDLE
       && resourceType > 0
       && learned.has(resourceType)
-      && requestedAmount > 0
-      && currentStock >= requestedAmount;
+      && requestedAmount > 0;
     const reasons = [];
     if (!currentLand.isResourcePoint) reasons.push("current_land_is_not_resource_point");
-    if (!(currentStock > 0)) reasons.push("current_land_has_no_stock");
     if (normalizeRoleState(me.role?.state) !== ROLE_STATE_IDLE) reasons.push("role_is_not_idle");
     if (resourceType <= 0) reasons.push("resource_type_missing");
     else if (!learned.has(resourceType)) reasons.push("required_skill_not_learned");
     if (!(requestedAmount > 0)) reasons.push("invalid_amount");
-    else if (currentStock < requestedAmount) reasons.push("not_enough_stock_for_amount");
     return {
       role: roleWallet,
       requestedAmount,
