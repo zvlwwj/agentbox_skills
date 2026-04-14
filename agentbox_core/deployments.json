@@ -2,25 +2,25 @@
   "network": "base-sepolia",
   "chainId": 84532,
   "contracts": {
-    "Config": "0x9a2269ea54c4b09572105c25f649677eA39d0968",
-    "Role_NFT": "0x3341314472098223d784682a4027A0c76A05c5e6",
-    "Wallet_Impl": "0x057fc6fa12A67A863cEe90eDE2Cb7496ccd172f5",
-    "Land_ERC721": "0xdA1B0985eAd1d0b6BafC879d2C01c903A26Bd68D",
-    "Resource_ERC1155": "0x8E87897e15ea6c2E124E2592b472088ee9D809D7",
-    "Randomizer": "0x0C33d9a08FCEC0360C530b512f7703307f678Fc1",
-    "Economy_ERC20": "0xf34b5383dE80fC615646207bA907D4A73F6EFA7B",
-    "Core_Diamond": "0x35D1670b44D0c50f1844C46F1282040Df75606ae",
-    "Core_Diamond_Proxy": "0x35D1670b44D0c50f1844C46F1282040Df75606ae",
+    "Config": "0xDA55405d3e9Bd3D8C512Fb0Dbf8c35dDeCC7f7B2",
+    "Role_NFT": "0x7a254884ab45F18A4C93F1dFf219B8EBfD3d134D",
+    "Wallet_Impl": "0x4beb1db741f119478e2280ae07063deec09506d9",
+    "Land_ERC721": "0xcc13017cFa1091D3E07b62153F367168515DcAe1",
+    "Resource_ERC1155": "0x726A983aE7518a62594e6BeF949Ca9E3Defb700f",
+    "Randomizer": "0xA5772E9366971d600d085246D06d08381b594bfF",
+    "Economy_ERC20": "0x847213763bFd06b49000FB75333E12e5e6eee296",
+    "Core_Diamond": "0x3B8421cB5F7Ca9e8E8F311a7d02Ff1500b23C406",
+    "Core_Diamond_Proxy": "0x3B8421cB5F7Ca9e8E8F311a7d02Ff1500b23C406",
     "Facets": {
-      "ActionFacet": "0x938413f0A472A69596f2091EC61Ef08eC04f86Cb",
-      "AdminFacet": "0xd7c72E8BE6f58397105Ce1797F80635f3db81284",
-      "GatherCraftFacet": "0xd0Fa27034061c75E665293a1e61d2B566B9f0D40",
-      "LearnFacet": "0x9200993375864982EaD3396C390584B4Bb29c409",
-      "MapFacet": "0x53AED9d503938BaAd1DDBF9A174CBF9767B6d883",
-      "RoleFacet": "0x88705b14B9Ca806Ac0b4f212Ff661870FedBeA26",
-      "ReadFacet": "0xA3E7c527563434a5Cb37c5A0D3EaB62A986c786d",
-      "SocialFacet": "0x8C8751Cc7f2FF6dF360ddDcDB06Ff570f4a8deE2",
-      "DiamondLoupeFacet": "0xFcc22F959848d72FE64297b9Ec7BbF5DA284C234"
+      "ActionFacet": "0x7af89ec5e1ec8ede49453f751f494bc5f608971d",
+      "AdminFacet": "0x341f382e642e94ea16b2e8cadfc8116b7ab80f1c",
+      "GatherCraftFacet": "0xfc7050ced664b9dc84042d10deff8ecc99c8571b",
+      "LearnFacet": "0x4227252ddad55751d45c9396f3522363a4a52014",
+      "MapFacet": "0xdb284318b273f83ef8c07f4e0bf7927bca81f2b3",
+      "RoleFacet": "0xe725e7dd1016fd3b7f59634cdd9a38a5ded9276c",
+      "ReadFacet": "0x3c0c6f3f9b4c1974734d3765a1adf76630014261",
+      "SocialFacet": "0x10683a5b668ae33e69b75fb703d70aa9ba998c7b",
+      "DiamondLoupeFacet": "0xd657a99930eae19f1ea5833a0dc5a3309baed25e"
     }
   }
 }
