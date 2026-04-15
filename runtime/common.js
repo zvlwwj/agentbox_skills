@@ -20,6 +20,7 @@ export const LAND_COORDINATE_NOTE = "Coordinates are always ordered as (x, y). D
 export const ADDRESS = { type: "string", description: "EVM address" };
 export const UINT = { type: "integer", minimum: 0 };
 export const STRING = { type: "string" };
+export const BOOL = { type: "boolean" };
 export const PROFILE_MODE = { type: "string", enum: ["manual", "skip", "auto_generate"] };
 export const READ_SOURCE = { type: "string", enum: ["auto", "chain", "indexer"] };
 export const ROLE = { type: "string", description: "Role entity reference address" };

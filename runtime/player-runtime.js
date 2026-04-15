@@ -1,11 +1,10 @@
-import fs from "node:fs";
-import path from "node:path";
 import { ethers } from "ethers";
 
 import {
   ADDRESS,
   DEFAULT_ROLE_EQUIPMENT_SLOTS,
   DEFAULT_ROLE_RESOURCE_TOKEN_IDS,
+  BOOL,
   PAGE_SIZE,
   PROFILE_MODE,
   READ_SOURCE,
@@ -31,9 +30,7 @@ import {
   successResult,
   txError,
 } from "./common.js";
-import { AgentboxClient, SignerStore, loadSettings } from "./clients.js";
-
-const ID_MAPPINGS_PATH = (pluginRoot) => path.join(pluginRoot, "agentbox_core", "id-mappings.json");
+import { ActiveRoleStore, AgentboxClient, SignerStore, loadSettings } from "./clients.js";
 
 function learnedSkillIds(me) {
   return new Set((me.skills || []).filter((item) => item.learned).map((item) => Number(item.skillId || 0)));
@@ -52,11 +49,15 @@ function toFiniteNumber(value) {
 
 export function buildToolSpecs() {
   return [
-    { name: "agentbox.signer.prepare", description: "Create the single local gameplay private key.", parameters: obj({ label: STRING }) },
-    { name: "agentbox.signer.import", description: "Import the single local gameplay private key.", parameters: obj({ privateKey: STRING, label: STRING }, ["privateKey"]) },
+    { name: "agentbox.signer.prepare", description: "Create the single local gameplay private key. If a signer already exists, replacing it requires force=true, backupConfirmed=true, and confirmSignerReplacement=true.", parameters: obj({ label: STRING, force: BOOL, backupConfirmed: BOOL, confirmSignerReplacement: BOOL }) },
+    { name: "agentbox.signer.import", description: "Import the single local gameplay private key. If a signer already exists, replacing it requires force=true, backupConfirmed=true, and confirmSignerReplacement=true.", parameters: obj({ privateKey: STRING, label: STRING, force: BOOL, backupConfirmed: BOOL, confirmSignerReplacement: BOOL }, ["privateKey"]) },
     { name: "agentbox.signer.export", description: "Export the currently stored local gameplay private key.", parameters: obj({}) },
     { name: "agentbox.signer.read", description: "Read the current local signer state.", parameters: obj({}) },
     { name: "agentbox.registration.confirm", description: "Confirm direct registration with the active signer and continue registration.", parameters: obj({ profileMode: PROFILE_MODE, nickname: STRING, gender: UINT }) },
+    { name: "agentbox.roles.list_owned", description: "List all game roles owned by the active signer owner address.", parameters: obj({}) },
+    { name: "agentbox.roles.read_active", description: "Read the currently selected active role.", parameters: obj({}) },
+    { name: "agentbox.roles.select_active", description: "Select the active role used when role is omitted.", parameters: obj({ roleWallet: ROLE, roleId: UINT }) },
+    { name: "agentbox.roles.clear_active", description: "Clear the currently selected active role.", parameters: obj({}) },
     { name: "agentbox.skills.read_role_snapshot", description: "Read the current role snapshot grouped into staticInfo and dynamicInfo.", parameters: obj({ role: ROLE, source: READ_SOURCE }) },
     { name: "agentbox.skills.read_world_static_info", description: "Read lower-frequency world facts used for planning.", parameters: obj({ role: ROLE, source: READ_SOURCE }) },
     { name: "agentbox.skills.read_world_dynamic_info", description: "Read frequently changing world facts near the current role.", parameters: obj({ role: ROLE, source: READ_SOURCE }) },
@@ -65,7 +66,6 @@ export function buildToolSpecs() {
     { name: "agentbox.skills.read_land", description: "Read one land by landId or coordinate.", parameters: obj({ landId: UINT, x: UINT, y: UINT, source: READ_SOURCE }) },
     { name: "agentbox.skills.read_last_mint", description: "Read the last mint event observed by the indexer.", parameters: obj({}) },
     { name: "agentbox.skills.read_lands_with_ground_tokens", description: "Read all lands that currently have ground tokens.", parameters: obj({}) },
-    { name: "agentbox.skills.read_id_mappings", description: "Read the Agentbox ID mappings table.", parameters: obj({}) },
     { name: "agentbox.skills.read_global_config", description: "Read current global config values.", parameters: obj({ source: READ_SOURCE }) },
     { name: "agentbox.skills.move.instant", description: "Submit an instant move to a target coordinate.", parameters: obj({ role: ROLE, x: UINT, y: UINT }, ["role", "x", "y"]) },
     { name: "agentbox.skills.teleport.start", description: "Start teleporting to a target coordinate.", parameters: obj({ role: ROLE, x: UINT, y: UINT }, ["role", "x", "y"]) },
@@ -104,6 +104,7 @@ export class JSPlayerRuntime {
     this.pluginRoot = pluginRoot;
     this.client = new AgentboxClient(this.settings);
     this.signers = new SignerStore(this.settings);
+    this.activeRoles = new ActiveRoleStore(this.settings);
     this.toolSpecs = buildToolSpecs();
     this.tools = new Map(this.toolSpecs.map((tool) => [tool.name, tool]));
   }
@@ -150,11 +151,15 @@ export class JSPlayerRuntime {
 
   async dispatch(toolName, payload) {
     switch (toolName) {
-      case "agentbox.signer.prepare": return this.signerPrepare(payload.label);
-      case "agentbox.signer.import": return this.signerImport(payload.privateKey, payload.label);
+      case "agentbox.signer.prepare": return this.signerPrepare(payload.label, payload.force, payload.backupConfirmed, payload.confirmSignerReplacement);
+      case "agentbox.signer.import": return this.signerImport(payload.privateKey, payload.label, payload.force, payload.backupConfirmed, payload.confirmSignerReplacement);
       case "agentbox.signer.export": return this.signerExport();
       case "agentbox.signer.read": return this.signerRead();
       case "agentbox.registration.confirm": return this.registrationConfirm(payload);
+      case "agentbox.roles.list_owned": return this.listOwnedRoles();
+      case "agentbox.roles.read_active": return this.readActiveRole();
+      case "agentbox.roles.select_active": return this.selectActiveRole(payload);
+      case "agentbox.roles.clear_active": return this.clearActiveRole();
       case "agentbox.skills.read_role_snapshot": return this.readRoleSnapshot(payload.role, payload.source);
       case "agentbox.skills.read_world_static_info": return this.readWorldStaticInfo(payload.role, payload.source);
       case "agentbox.skills.read_world_dynamic_info": return this.readWorldDynamicInfo(payload.role, payload.source);
@@ -163,7 +168,6 @@ export class JSPlayerRuntime {
       case "agentbox.skills.read_land": return this.readLand(payload);
       case "agentbox.skills.read_last_mint": return this.readLastMint();
       case "agentbox.skills.read_lands_with_ground_tokens": return this.readLandsWithGroundTokens();
-      case "agentbox.skills.read_id_mappings": return this.readIdMappings();
       case "agentbox.skills.read_global_config": return this.readGlobalConfig(payload.source);
       case "agentbox.skills.move.instant": return this.coreWrite(toolName, "moveTo", [payload.role, Number(payload.x), Number(payload.y)], "Instant movement transaction submitted", { roleWallet: payload.role, allowedStates: new Set([ROLE_STATE_IDLE]) });
       case "agentbox.skills.teleport.start": return this.coreWrite(toolName, "startTeleport", [payload.role, Number(payload.x), Number(payload.y)], "Teleport started", { roleWallet: payload.role, allowedStates: new Set([ROLE_STATE_IDLE]) });
@@ -199,10 +203,8 @@ export class JSPlayerRuntime {
   }
 
   async resolveDefaultRole() {
-    const { wallet } = this.signers.loadActiveWallet(this.client.provider);
-    if (!wallet) return null;
-    const recovered = await this.client.recoverOwnedRole(wallet.address);
-    return recovered?.roleWallet || null;
+    const activeRole = await this.requireValidatedActiveRole();
+    return activeRole.roleWallet;
   }
 
   requireActiveSigner() {
@@ -211,10 +213,93 @@ export class JSPlayerRuntime {
     return { record, wallet };
   }
 
+  async ownedRolesForActiveSigner() {
+    const { wallet } = this.requireActiveSigner();
+    const ownedRoles = await this.client.listOwnedRoles(wallet.address);
+    return {
+      ownerAddress: wallet.address,
+      ownedRoles,
+    };
+  }
+
+  async buildOwnedRolesPayload() {
+    const { ownerAddress, ownedRoles } = await this.ownedRolesForActiveSigner();
+    const activeRoleRecord = this.activeRoles.loadRecord();
+    const activeRoleWallet = activeRoleRecord?.roleWallet?.toLowerCase() || null;
+    return {
+      ownerAddress,
+      activeRole: activeRoleRecord,
+      ownedRolesCount: ownedRoles.length,
+      ownedRoles: ownedRoles.map((item) => ({
+        ...item,
+        isActive: Boolean(activeRoleWallet && item.roleWallet.toLowerCase() === activeRoleWallet),
+      })),
+    };
+  }
+
+  async requireValidatedActiveRole() {
+    const record = this.activeRoles.loadRecord();
+    if (!record?.roleWallet) {
+      throw precheckError("MISSING_ACTIVE_ROLE", "No active role is selected. Use agentbox.roles.list_owned and agentbox.roles.select_active first");
+    }
+    const { ownerAddress, ownedRoles } = await this.ownedRolesForActiveSigner();
+    const ownedRole = ownedRoles.find((item) => item.roleWallet.toLowerCase() === record.roleWallet.toLowerCase());
+    if (!ownedRole) {
+      throw precheckError("ACTIVE_ROLE_NOT_OWNED", "The stored active role is not owned by the current active signer", {
+        activeRole: record,
+        ownerAddress,
+      });
+    }
+    const normalized = {
+      roleId: ownedRole.roleId,
+      roleWallet: ownedRole.roleWallet,
+      ownerAddress,
+      updated_at: record.updated_at,
+    };
+    if (record.roleId !== normalized.roleId || record.ownerAddress?.toLowerCase() !== ownerAddress.toLowerCase() || record.roleWallet !== normalized.roleWallet) {
+      this.activeRoles.setActiveRole(normalized);
+      return this.activeRoles.loadRecord();
+    }
+    return normalized;
+  }
+
+  async maybeReadActiveRole() {
+    const record = this.activeRoles.loadRecord();
+    if (!record) {
+      return {
+        hasActiveRole: false,
+        activeRole: null,
+        isOwnedByActiveSigner: false,
+      };
+    }
+    try {
+      const validated = await this.requireValidatedActiveRole();
+      return {
+        hasActiveRole: true,
+        activeRole: validated,
+        isOwnedByActiveSigner: true,
+      };
+    } catch (error) {
+      const { wallet } = this.requireActiveSigner();
+      return {
+        hasActiveRole: true,
+        activeRole: record,
+        isOwnedByActiveSigner: false,
+        ownerAddress: wallet.address,
+        warning: {
+          errorCode: error.errorCode || "PRECHECK_ACTIVE_ROLE_INVALID",
+          errorMessage: error.message || String(error),
+        },
+      };
+    }
+  }
+
   async signerPayload() {
     const { record } = this.signers.loadActiveWallet(this.client.provider);
     if (!record) return { hasSigner: false, signer: null };
     const balance = await this.client.getBalance(record.address);
+    const ownedRoles = await this.client.listOwnedRoles(record.address);
+    const activeRoleState = await this.maybeReadActiveRole();
     return {
       hasSigner: true,
       signer: {
@@ -224,18 +309,52 @@ export class JSPlayerRuntime {
         balanceEth: this.client.formatEth(balance),
         hasPrivateKey: true,
       },
+      ownedRolesCount: ownedRoles.length,
+      activeRole: activeRoleState.activeRole,
+      hasActiveRole: activeRoleState.hasActiveRole,
+      activeRoleOwnedBySigner: activeRoleState.isOwnedByActiveSigner,
     };
   }
 
-  signerPrepare(label) {
+  ensureSignerOverwriteAllowed(force, backupConfirmed = false, confirmSignerReplacement = false, nextAddress = null) {
+    const existing = this.signers.loadRecord();
+    if (!existing) return null;
+    const sameAddress = nextAddress && existing.address.toLowerCase() === nextAddress.toLowerCase();
+    if (!force && !sameAddress) {
+      throw precheckError("SIGNER_ALREADY_EXISTS", "A local signer already exists. Reuse it for new account registration. Before replacing it, export and back up the private key, warn the user, and only proceed with force=true after explicit confirmation", {
+        existingSigner: {
+          signerId: existing.signer_id,
+          address: existing.address,
+          label: existing.label,
+        },
+      });
+    }
+    if (force && !sameAddress && (!backupConfirmed || !confirmSignerReplacement)) {
+      throw precheckError("SIGNER_REPLACEMENT_NOT_CONFIRMED", "Replacing the local signer requires a backup reminder and explicit user confirmation. Export the current private key first, confirm the user has backed it up, and then retry with backupConfirmed=true and confirmSignerReplacement=true", {
+        existingSigner: {
+          signerId: existing.signer_id,
+          address: existing.address,
+          label: existing.label,
+        },
+      });
+    }
+    return existing;
+  }
+
+  signerPrepare(label, force = false, backupConfirmed = false, confirmSignerReplacement = false) {
+    const previous = this.ensureSignerOverwriteAllowed(force, backupConfirmed, confirmSignerReplacement);
     const record = this.signers.createSigner(label);
+    if (!previous || previous.address.toLowerCase() !== record.address.toLowerCase()) this.activeRoles.clear();
     return successResult("agentbox.signer.prepare", "Local signer created", {
       data: { signerId: record.signer_id, address: record.address, label: record.label },
     });
   }
 
-  signerImport(privateKey, label) {
+  signerImport(privateKey, label, force = false, backupConfirmed = false, confirmSignerReplacement = false) {
+    const importedWallet = new ethers.Wallet(privateKey);
+    const previous = this.ensureSignerOverwriteAllowed(force, backupConfirmed, confirmSignerReplacement, importedWallet.address);
     const record = this.signers.importSigner(privateKey, label);
+    if (!previous || previous.address.toLowerCase() !== record.address.toLowerCase()) this.activeRoles.clear();
     return successResult("agentbox.signer.import", "Local signer imported", {
       data: { signerId: record.signer_id, address: record.address, label: record.label },
     });
@@ -255,6 +374,68 @@ export class JSPlayerRuntime {
 
   async signerRead() {
     return successResult("agentbox.signer.read", "Loaded signer state", { data: await this.signerPayload() });
+  }
+
+  async listOwnedRoles() {
+    return successResult("agentbox.roles.list_owned", "Listed all roles owned by the active signer", {
+      data: await this.buildOwnedRolesPayload(),
+    });
+  }
+
+  async readActiveRole() {
+    const owned = await this.buildOwnedRolesPayload();
+    const activeRoleState = await this.maybeReadActiveRole();
+    return successResult("agentbox.roles.read_active", "Read active role state", {
+      data: {
+        ownerAddress: owned.ownerAddress,
+        ownedRolesCount: owned.ownedRolesCount,
+        hasActiveRole: activeRoleState.hasActiveRole,
+        activeRole: activeRoleState.activeRole,
+        isOwnedByActiveSigner: activeRoleState.isOwnedByActiveSigner,
+        warning: activeRoleState.warning || null,
+      },
+    });
+  }
+
+  async selectActiveRole({ roleWallet, roleId }) {
+    if (!roleWallet && roleId == null) {
+      throw precheckError("MISSING_ROLE_SELECTION", "Provide roleWallet or roleId to select the active role");
+    }
+    const { ownerAddress, ownedRoles } = await this.ownedRolesForActiveSigner();
+    const selected = ownedRoles.find((item) => {
+      if (roleWallet && item.roleWallet.toLowerCase() === roleWallet.toLowerCase()) return true;
+      if (roleId != null && item.roleId === Number(roleId)) return true;
+      return false;
+    });
+    if (!selected) {
+      throw precheckError("ROLE_NOT_OWNED", "The requested role is not owned by the active signer", {
+        ownerAddress,
+        requestedRoleWallet: roleWallet || null,
+        requestedRoleId: roleId ?? null,
+      });
+    }
+    const activeRole = this.activeRoles.setActiveRole({
+      roleId: selected.roleId,
+      roleWallet: selected.roleWallet,
+      ownerAddress,
+    });
+    return successResult("agentbox.roles.select_active", "Selected active role", {
+      data: {
+        ownerAddress,
+        activeRole,
+        ownedRolesCount: ownedRoles.length,
+      },
+    });
+  }
+
+  clearActiveRole() {
+    this.activeRoles.clear();
+    return successResult("agentbox.roles.clear_active", "Cleared active role", {
+      data: {
+        activeRole: null,
+        hasActiveRole: false,
+      },
+    });
   }
 
   async selectReadSource(requestedSource, { indexerSupported }) {
@@ -747,14 +928,6 @@ export class JSPlayerRuntime {
     });
   }
 
-  async readIdMappings() {
-    const filePath = ID_MAPPINGS_PATH(this.pluginRoot);
-    if (!fs.existsSync(filePath)) throw precheckError("ID_MAPPINGS_NOT_FOUND", "Bundled id-mappings.json was not found");
-    return successResult("agentbox.skills.read_id_mappings", "Loaded bundled Agentbox ID mappings", {
-      data: JSON.parse(fs.readFileSync(filePath, "utf8")),
-    });
-  }
-
   async validateRoleWallet(roleWallet) {
     if (!ethers.isAddress(roleWallet)) throw precheckError("INVALID_ADDRESS", "role is not a valid address", { field: "role" });
     const identity = await this.client.getRoleIdentity(roleWallet);
@@ -1168,17 +1341,24 @@ export class JSPlayerRuntime {
     await this.validateRuntime();
     const { wallet } = this.requireActiveSigner();
     const resolved = await this.resolveRegistrationProfile({ profileMode, nickname, gender });
-    const recovered = await this.client.recoverOwnedRole(wallet.address);
-    if (recovered) {
+    const ownedRolesBefore = await this.client.listOwnedRoles(wallet.address);
+    let activeRole = null;
+    try {
+      activeRole = await this.requireValidatedActiveRole();
+    } catch {}
+    if (activeRole) {
+      const registrationStage = await this.resolveRegistrationStage(activeRole.roleWallet);
+      if (registrationStage.status === "role_created") {
       const currentBalanceWei = await this.client.getBalance(wallet.address);
       const minimumOwnerBalanceWei = ethers.parseEther(this.settings.autoMinOwnerBalanceEth);
-      const registrationStage = await this.resolveRegistrationStage(recovered.roleWallet);
       if (currentBalanceWei < minimumOwnerBalanceWei) {
         return this.topUpResult(wallet.address, currentBalanceWei, minimumOwnerBalanceWei, {
-          roleId: recovered.roleId,
-          roleWallet: recovered.roleWallet,
+          roleId: activeRole.roleId,
+          roleWallet: activeRole.roleWallet,
           stage: "after_registration",
           thresholdKind: "owner_auto",
+          activeRole,
+          ownedRolesCount: ownedRolesBefore.length,
         });
       }
       const activeSigner = await this.activeSignerSummary();
@@ -1187,28 +1367,46 @@ export class JSPlayerRuntime {
           depositAddress: wallet.address,
           registrationStatus: registrationStage.status,
           registrationStage: registrationStage.stage,
-          roleId: recovered.roleId,
-          role: recovered.roleWallet,
+          roleId: activeRole.roleId,
+          role: activeRole.roleWallet,
+          activeRole,
+          ownedRolesCount: ownedRolesBefore.length,
           activeSigner,
           activeSignerBalanceEth: activeSigner?.balanceEth ?? null,
         },
       });
     }
+    }
 
     let currentBalanceWei = await this.client.getBalance(wallet.address);
     const minimumBalanceWei = ethers.parseEther(this.settings.minNativeBalanceEth);
     if (currentBalanceWei < minimumBalanceWei) {
-      return this.topUpResult(wallet.address, currentBalanceWei, minimumBalanceWei, { stage: "before_role_create" });
+      return this.topUpResult(wallet.address, currentBalanceWei, minimumBalanceWei, {
+        stage: "before_role_create",
+        activeRole,
+        ownedRolesCount: ownedRolesBefore.length,
+      });
     }
     const createRequiredWei = await this.client.estimateRequiredBalance(this.client.core, resolved.nickname ? "createCharacter" : "createCharacter", resolved.nickname ? [resolved.nickname, resolved.gender] : [], wallet, ethers.parseEther(this.settings.registrationValueEth));
     const minimumRequired = createRequiredWei > minimumBalanceWei ? createRequiredWei : minimumBalanceWei;
     currentBalanceWei = await this.client.getBalance(wallet.address);
     if (currentBalanceWei < minimumRequired) {
-      return this.topUpResult(wallet.address, currentBalanceWei, minimumRequired, { stage: "before_role_create" });
+      return this.topUpResult(wallet.address, currentBalanceWei, minimumRequired, {
+        stage: "before_role_create",
+        activeRole,
+        ownedRolesCount: ownedRolesBefore.length,
+      });
     }
     const tx = await this.client.sendTransaction(this.client.core, resolved.nickname ? "createCharacter" : "createCharacter", resolved.nickname ? [resolved.nickname, resolved.gender] : [], wallet, ethers.parseEther(this.settings.registrationValueEth));
-    const created = await this.client.recoverOwnedRole(wallet.address);
+    const ownedRolesAfter = await this.client.listOwnedRoles(wallet.address);
+    const previousWallets = new Set(ownedRolesBefore.map((item) => item.roleWallet.toLowerCase()));
+    const created = ownedRolesAfter.find((item) => !previousWallets.has(item.roleWallet.toLowerCase())) || ownedRolesAfter[ownedRolesAfter.length - 1];
     if (!created) throw txError("ROLE_CREATE_PARSE", "Unable to recover role creation from chain");
+    const nextActiveRole = this.activeRoles.setActiveRole({
+      roleId: created.roleId,
+      roleWallet: created.roleWallet,
+      ownerAddress: wallet.address,
+    });
     const activeSigner = await this.activeSignerSummary();
     return successResult("agentbox.registration.confirm", "Registration confirmed with the active signer", {
       data: {
@@ -1218,6 +1416,8 @@ export class JSPlayerRuntime {
         registrationStage: "pending_spawn",
         roleId: created.roleId,
         role: created.roleWallet,
+        activeRole: nextActiveRole,
+        ownedRolesCount: ownedRolesAfter.length,
         nickname: resolved.nickname,
         gender: resolved.gender,
         activeSigner,
@@ -1232,11 +1432,15 @@ export class JSPlayerRuntime {
   async activeSignerSummary() {
     const { record } = this.signers.loadActiveWallet(this.client.provider);
     if (!record) return null;
+    const activeRoleState = await this.maybeReadActiveRole();
+    const ownedRoles = await this.client.listOwnedRoles(record.address);
     return {
       signerId: record.signer_id,
       address: record.address,
       label: record.label,
       balanceEth: this.client.formatEth(await this.client.getBalance(record.address)),
+      ownedRolesCount: ownedRoles.length,
+      activeRole: activeRoleState.activeRole,
     };
   }
 
@@ -1278,7 +1482,7 @@ export class JSPlayerRuntime {
     return { status: "spawn_completed", stage: "spawn_completed" };
   }
 
-  topUpResult(depositAddress, currentBalanceWei, requiredBalanceWei, { roleId, roleWallet, stage, thresholdKind = "registration" }) {
+  topUpResult(depositAddress, currentBalanceWei, requiredBalanceWei, { roleId, roleWallet, stage, thresholdKind = "registration", activeRole = null, ownedRolesCount = 0 }) {
     const thresholdName = thresholdKind === "registration" ? "MIN_NATIVE_BALANCE_ETH" : "AUTO_MIN_OWNER_BALANCE_ETH";
     const shortfallWei = requiredBalanceWei > currentBalanceWei ? requiredBalanceWei - currentBalanceWei : 0n;
     return successResult("agentbox.registration.confirm", "Active signer needs more ETH before registration can continue", {
@@ -1292,6 +1496,8 @@ export class JSPlayerRuntime {
         registrationStage: stage,
         thresholdKind,
         thresholdName,
+        activeRole,
+        ownedRolesCount,
         message: `Please send at least ${this.client.formatEth(shortfallWei)} more ETH to satisfy ${thresholdName}.`,
         ...(roleId != null ? { roleId } : {}),
         ...(roleWallet ? { role: roleWallet } : {}),

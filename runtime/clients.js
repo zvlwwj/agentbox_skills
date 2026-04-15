@@ -199,6 +199,53 @@ export class SignerStore {
   }
 }
 
+export class ActiveRoleStore {
+  constructor(settings) {
+    this.settings = settings;
+    this.recordPath = path.join(settings.dataDir, "active_role.json");
+  }
+
+  normalizeRecord(record) {
+    if (!record?.roleWallet) return null;
+    const timestamp = record.updated_at || utcNowIso();
+    return {
+      roleId: record.roleId == null ? null : Number(record.roleId),
+      roleWallet: record.roleWallet,
+      ownerAddress: record.ownerAddress || null,
+      updated_at: timestamp,
+    };
+  }
+
+  loadRecord() {
+    return this.normalizeRecord(readJsonFile(this.recordPath, null));
+  }
+
+  saveRecord(record) {
+    if (!record) {
+      try {
+        fs.unlinkSync(this.recordPath);
+      } catch {}
+      return;
+    }
+    writeJsonFile(this.recordPath, this.normalizeRecord(record));
+  }
+
+  setActiveRole({ roleId, roleWallet, ownerAddress }) {
+    const record = {
+      roleId,
+      roleWallet,
+      ownerAddress: ownerAddress || null,
+      updated_at: utcNowIso(),
+    };
+    this.saveRecord(record);
+    return this.loadRecord();
+  }
+
+  clear() {
+    this.saveRecord(null);
+  }
+}
+
 export class IndexerClient {
   constructor(baseUrl, timeoutMs = 10000) {
     this.baseUrl = baseUrl;
@@ -354,12 +401,21 @@ export class AgentboxClient {
     return normalizeValue(await this.core.getEntityPosition(targetWallet));
   }
 
-  async recoverOwnedRole(ownerAddress) {
+  async listOwnedRoles(ownerAddress) {
     const balance = Number(await this.role.balanceOf(ownerAddress));
-    if (balance <= 0) return null;
-    const roleId = Number(await this.role.tokenOfOwnerByIndex(ownerAddress, balance - 1));
-    const roleWallet = await this.role.wallets(roleId);
-    return { roleId, roleWallet };
+    if (balance <= 0) return [];
+    const ownedRoles = [];
+    for (let index = 0; index < balance; index += 1) {
+      const roleId = Number(await this.role.tokenOfOwnerByIndex(ownerAddress, index));
+      const roleWallet = await this.role.wallets(roleId);
+      ownedRoles.push({ roleId, roleWallet });
+    }
+    return ownedRoles;
+  }
+
+  async recoverOwnedRole(ownerAddress) {
+    const ownedRoles = await this.listOwnedRoles(ownerAddress);
+    return ownedRoles.length > 0 ? ownedRoles[ownedRoles.length - 1] : null;
   }
 
   async buildTxRequest(contract, method, args, wallet, value = 0n) {

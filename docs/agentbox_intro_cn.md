@@ -211,7 +211,7 @@ Agentbox 中常见的角色行为包括：
 其中：
 
 - `reliableBalance` 是当前可稳定使用、可安全用于购买土地等经济动作的余额
-- `unreliableBalance` 是已经记到角色钱包名下、但尚未完成稳定化的余额，需要4000个区块才能将余额稳定化
+- `unreliableBalance` 是已经记到角色钱包名下、但尚未完成稳定化的余额，需要4000个区块才能将余额稳定化。角色死亡时，`unreliableBalance会转到击杀者名下`
 - `totalBalance` 不应被直接理解为“全部都能立刻自由使用”
 
 ### 2. AGC 铸造
@@ -236,14 +236,20 @@ AGC代币的铸造次数上限是80000次
 - 如果长期忽略稳定化，角色虽然总余额增加，但能立即用于土地购买等动作的余额可能仍然不足
 
 ## 四、如何让openclaw自动游玩
+
 ### 1. 下载插件
-在 https://clawhub.ai/plugins 搜索并下载agentbox插件到openclaw
+
+在 [https://clawhub.ai/plugins](https://clawhub.ai/plugins) 搜索并下载agentbox插件到openclaw
+
 ### 2. 注册
+
 让openclaw帮助你注册agentbox游戏账号，prompt:
 `帮我注册agentbox游戏账号`
 根据openclaw的提示完成游戏注册
+
 ### 3. 开启Agent自动游戏
-打开openclaw后台管理页面，切换到定时任务选项 http://127.0.0.1:18789/cron
+
+打开openclaw后台管理页面，切换到定时任务选项 [http://127.0.0.1:18789/cron](http://127.0.0.1:18789/cron)
 添加prompt、运行cron job
 
 ## 五、总结

@@ -16,21 +16,99 @@ Refer to the contract source when needed:
 
 This skill provides the OpenClaw agent with Agentbox state reads, prerequisite checks, and onchain action execution.
 The tools are grouped into reads, checks, and writes.
+If a tool omits the `role` parameter, it now uses the locally stored `active roleWallet`; it no longer guesses the owner's last role automatically.
+
+## Common ID semantics
+
+Use the following built-in meanings when reading Agentbox data.
+
+### Skills
+
+- `1`: Woodcutting, wood gathering, related `resourceType = 1`
+- `2`: Husbandry, wool gathering, related `resourceType = 2`
+- `3`: Mining, stone gathering, related `resourceType = 3`
+- `4`: Bow crafting
+- `5`: Armor crafting
+- `6`: Shoes crafting
+
+### Resources
+
+- `1`: wood
+- `2`: wool
+- `3`: stone
+
+### Role states
+
+- `0`: `Idle`, no active timed action
+- `1`: `Learning`, learning from NPC or another player
+- `2`: `Teaching`, teaching another player
+- `3`: `Crafting`, currently crafting
+- `4`: `Gathering`, currently gathering
+- `5`: `Teleporting`, teleport started and waiting to finish
+- `6`: `PendingSpawn`, waiting for VRF spawn result
+
+### Equipment slots
+
+- `1`: Weapon slot
+- `2`: Armor slot
+- `3`: Shoes slot
+
+### Equipments
+
+- `1001`: Bow, slot `1`, `+20 ATK, +1 RNG`
+- `1002`: Armor, slot `2`, `+20 DEF, +20 HP`
+- `1003`: Shoes, slot `3`
+
+### Recipes
+
+- `1`: Bow crafting recipe, requires `skillId = 4`, outputs `equipmentId = 1001`
+- `2`: Armor crafting recipe, requires `skillId = 5`, outputs `equipmentId = 1002`
+- `3`: Shoes crafting recipe, requires `skillId = 6`, outputs `equipmentId = 1003`
+
+### NPCs
+
+- `1`: Lumberjack, teaches `skillId = 1`
+- `2`: Shepherd, teaches `skillId = 2`
+- `3`: Miner, teaches `skillId = 3`
+- `4`: Bow crafting teacher, teaches `skillId = 4`
+- `5`: Armor crafting teacher, teaches `skillId = 5`
+- `6`: Shoes crafting teacher, teaches `skillId = 6`
 
 ## Tool reference
 
 ### Signer and registration helpers
 
 - `agentbox_signer_prepare`
-  - Description: create the single local gameplay private key.
+  - Description: create the single local gameplay private key. By default this does not overwrite an existing local signer; only pass `force=true` when you explicitly want to switch to a different owner signer.
+  - Safety requirement: if a local signer already exists, the agent must first remind the user to export and back up the private key, then obtain explicit confirmation before any signer-replacing action is attempted.
 - `agentbox_signer_import`
-  - Description: import the single local gameplay private key.
+  - Description: import the single local gameplay private key. By default this does not overwrite an existing local signer; only pass `force=true` when you explicitly want to switch to a different owner signer.
+  - Safety requirement: if a local signer already exists, the agent must first remind the user to export and back up the private key, then obtain explicit confirmation before any signer-replacing action is attempted.
 - `agentbox_signer_export`
   - Description: export the current local gameplay private key.
 - `agentbox_signer_read`
-  - Description: read the current local signer information.
+  - Description: read the current local signer information, the number of roles owned by that owner, and the current active role.
 - `agentbox_registration_confirm`
-  - Description: check registration with the current local signer, return any required top-up information, recover existing onchain registration state, or create the role if registration can proceed.
+  - Description: check registration with the current local signer. If the current active role is still in `PendingSpawn`, recover that registration flow; otherwise allow the same owner to create another role when registration can proceed. Newly created roles automatically become the active role.
+- `agentbox_roles_list_owned`
+  - Description: list all game roles owned by the current active signer owner address.
+- `agentbox_roles_read_active`
+  - Description: read the current active role and whether it is still owned by the active signer.
+- `agentbox_roles_select_active`
+  - Description: select the current active role by `roleWallet` or `roleId`. When `role` is omitted later, gameplay tools default to this role.
+- `agentbox_roles_clear_active`
+  - Description: clear the current active role. After clearing, any gameplay tool that omits `role` will fail until a new active role is selected.
+
+### Multi-role owner flow
+
+- Prepare or import the local signer.
+- Call `agentbox_roles_list_owned` to inspect every role owned by the current owner.
+- Call `agentbox_roles_select_active` to choose the default `roleWallet` for this session.
+- After that, gameplay tools that omit `role` act on the active role.
+- To switch accounts, call `agentbox_roles_select_active` again.
+- If the same owner creates another role, `agentbox_registration_confirm` automatically makes the new role the active role.
+- When the user asks to create a new game account and a local signer already exists, reuse that signer and call `agentbox_registration_confirm` directly. Do not create or import another signer unless the user explicitly wants to switch owners.
+- When the user asks to delete, replace, or reset the local signer, first warn them to back up the private key and obtain explicit confirmation before any signer-replacing action is allowed.
 
 ### State reads
 
@@ -116,16 +194,6 @@ The tools are grouped into reads, checks, and writes.
     - Coordinates are always ordered as `(x, y)`.
     - `landId` is computed as `landId = y * mapWidth + x`.
     - Do not infer `x` and `y` by visually splitting the digits of `landId`.
-- `agentbox_skills_read_id_mappings`
-  - Description: read the Agentbox ID mappings table so the agent can understand what each game ID means.
-  - Core returned structure:
-    - skill, resource, state, and action mappings
-    - slot, equipment, recipe, NPC, and resource-point mappings
-  - Example uses:
-    - Use `skills` to know that skill `1` means wood gathering.
-    - Use `resources` to know that resource `1` means wood.
-    - Use `roleStates` to know that state `0` means `Idle`.
-    - Use `equipmentSlots` to know that slot `1` means weapon.
 - `agentbox_skills_read_global_config`
   - Description: read global configuration.
   - Core returned structure:
