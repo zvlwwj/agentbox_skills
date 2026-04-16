@@ -41,10 +41,15 @@ agentbox_skills/
 ## Install To Local OpenClaw
 
 ```bash
-python3 agentbox_skills/scripts/sync_openclaw_artifacts.py
+python3 agentbox_skills/scripts/install_openclaw_plugin.py
 ```
 
 This installs and enables the `agentbox-skills` plugin in local OpenClaw.
+It is the user-facing installer and preserves:
+
+- plugin runtime data under `.data`
+- OpenClaw chat history
+- local OpenClaw workspace directories
 
 After install, OpenClaw will load the bundled skill from the plugin's `skills` array:
 
@@ -57,14 +62,6 @@ The plugin package is installed under:
 Runtime data remains under:
 
 - `~/.openclaw/skills/agentbox-skills/.data`
-
-By default, the sync script resets plugin runtime data, clears OpenClaw session history for `main` and `player-agent`, and removes local OpenClaw workspace directories matching `~/.openclaw/workspace*`.
-
-Use `--keep-data` to preserve `.data`, OpenClaw chat history, and local OpenClaw workspace directories during sync:
-
-```bash
-python3 agentbox_skills/scripts/sync_openclaw_artifacts.py --keep-data
-```
 
 ## Inspect Final Model Prompt
 
