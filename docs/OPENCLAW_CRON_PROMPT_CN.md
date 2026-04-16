@@ -13,6 +13,7 @@ owner：0xA9e542854bCC45580572E07092E3E929AeF874af
 7. 如果`planned_actions`中有“无法预计时间”的待执行任务，且当前可以计算，优先帮助其计算
 8. 不要使用 sleep 循环
 9. 本轮结束时必须写“执行结论”
+10. 对用户可见的 `goal_content`、`planned_actions`、`actions_done`、`result`、`reason`、`next_check_hint` 必须优先使用语义名称，不直接写 `npcId=4`、`recipeId=2`、`skillId=5` 这类 ID；只有排障或核对配置时，才允许在括号中补充 ID。
 
 ## 操作说明
 ### 要求字段
@@ -34,6 +35,7 @@ owner：0xA9e542854bCC45580572E07092E3E929AeF874af
 #### planned_actions：
 1. 优先继承上一轮未完成操作的行为
 2. 如果主目标的完成需要前置条件，`planned_actions`中需要包含这些前置条件的动作
+3. 描述动作时使用语义表达，例如“去护甲制作导师学习护甲制作”，不要写成“去 NPC 5 学 skillId 5”。
 
 
 ## 执行结论

@@ -23,10 +23,17 @@ import {
   buildCoordinateConvention,
   decodeEconomyBalances,
   errorResult,
+  equipmentNameFromId,
   normalizeValue,
+  npcNameFromId,
   normalizeRoleState,
   obj,
   precheckError,
+  recipeNameFromId,
+  resourceNameFromId,
+  roleStateNameFromValue,
+  skillNameFromId,
+  slotNameFromId,
   successResult,
   txError,
 } from "./common.js";
@@ -457,13 +464,13 @@ export class JSPlayerRuntime {
     const action = payload.action || {};
     const balance = payload.balance || {};
     return {
-      identity: {
+      identity: this.annotateRoleIdentity({
         isValidRole: payload.is_valid_role_wallet,
         roleId: payload.role_id,
         owner: payload.owner_address,
         controller: payload.controller_address,
-      },
-      role: {
+      }),
+      role: this.annotateRoleState({
         exists: payload.exists,
         state: payload.state,
         x: position.x ?? 0,
@@ -475,8 +482,8 @@ export class JSPlayerRuntime {
         maxHp: stats.max_hp ?? 0,
         range: stats.range ?? 0,
         mp: stats.mp ?? 0,
-      },
-      action: {
+      }),
+      action: this.annotateActionState({
         craftingStartBlock: action.crafting_start_block ?? 0,
         craftingRequiredBlocks: action.crafting_required_blocks ?? 0,
         craftingRecipeId: action.crafting_recipe_id ?? 0,
@@ -498,33 +505,33 @@ export class JSPlayerRuntime {
         gatheringRequiredBlocks: action.gathering_required_blocks ?? 0,
         gatheringTargetLandId: action.gathering_target_land_id ?? 0,
         gatheringAmount: action.gathering_amount ?? 0,
-      },
+      }),
       balances: {
         totalBalance: balance.agc_balance ?? 0,
         unreliableBalance: balance.unreliable_agc_balance ?? 0,
         reliableBalance: balance.reliable_agc_balance ?? 0,
       },
-      equipped: (payload.equipments || []).filter((item) => Number(item.equipment_id || 0) > 0).map((item) => ({
+      equipped: this.annotateEquipped((payload.equipments || []).filter((item) => Number(item.equipment_id || 0) > 0).map((item) => ({
         slot: Number(item.slot || 0),
         equipmentId: Number(item.equipment_id || 0),
         updatedAtBlock: item.updated_at_block,
-      })),
-      resourceBalances: (payload.resource_balances || []).filter((item) => Number(item.amount || 0) > 0).map((item) => ({
+      }))),
+      resourceBalances: this.annotateResourceBalances((payload.resource_balances || []).filter((item) => Number(item.amount || 0) > 0).map((item) => ({
         tokenId: Number(item.token_id || 0),
         amount: Number(item.amount || 0),
         updatedAtBlock: item.updated_at_block,
-      })),
-      ownedUnequippedEquipments: (payload.owned_unequipped_equipments || []).filter((item) => Number(item.amount || 0) > 0).map((item) => ({
+      }))),
+      ownedUnequippedEquipments: this.annotateOwnedEquipments((payload.owned_unequipped_equipments || []).filter((item) => Number(item.amount || 0) > 0).map((item) => ({
         equipmentId: Number(item.equipment_id || 0),
         amount: Number(item.amount || 0),
         slot: Number(item.slot || 0),
         updatedAtBlock: item.updated_at_block,
-      })),
-      skills: (payload.skills || []).map((item) => ({
+      }))),
+      skills: this.annotateSkills((payload.skills || []).map((item) => ({
         skillId: Number(item.skill_id || 0),
         learned: Boolean(item.learned),
         updatedAtBlock: item.updated_at_block,
-      })),
+      }))),
     };
   }
 
@@ -547,14 +554,14 @@ export class JSPlayerRuntime {
       const resourceBalances = await this.client.getResourceBalances(roleWallet, DEFAULT_ROLE_RESOURCE_TOKEN_IDS);
       const skills = await this.client.getRoleSkills(roleWallet, [1, 2, 3, 4, 5, 6, 7, 8]);
       data = {
-        identity,
-        role,
-        action,
+        identity: this.annotateRoleIdentity(identity),
+        role: this.annotateRoleState(role),
+        action: this.annotateActionState(action),
         balances,
-        equipped: DEFAULT_ROLE_EQUIPMENT_SLOTS.map((slot, index) => ({ slot, equipmentId: Number(equipped[index] || 0) })).filter((item) => item.equipmentId > 0),
-        resourceBalances: DEFAULT_ROLE_RESOURCE_TOKEN_IDS.map((tokenId, index) => ({ tokenId, amount: Number(resourceBalances[index] || 0) })).filter((item) => item.amount > 0),
+        equipped: this.annotateEquipped(DEFAULT_ROLE_EQUIPMENT_SLOTS.map((slot, index) => ({ slot, equipmentId: Number(equipped[index] || 0) })).filter((item) => item.equipmentId > 0)),
+        resourceBalances: this.annotateResourceBalances(DEFAULT_ROLE_RESOURCE_TOKEN_IDS.map((tokenId, index) => ({ tokenId, amount: Number(resourceBalances[index] || 0) })).filter((item) => item.amount > 0)),
         ownedUnequippedEquipments: [],
-        skills: [1, 2, 3, 4, 5, 6, 7, 8].map((skillId, index) => ({ skillId, learned: Boolean(skills[index]) })),
+        skills: this.annotateSkills([1, 2, 3, 4, 5, 6, 7, 8].map((skillId, index) => ({ skillId, learned: Boolean(skills[index]) }))),
       };
     }
     return successResult("agentbox.read.me", "Loaded role identity, snapshot, action state, balances, and owned role assets", { data });
@@ -636,8 +643,12 @@ export class JSPlayerRuntime {
   }
 
   async readActionFinishable(roleWallet) {
+    const finishable = await this.client.canFinishCurrentAction(roleWallet);
     return successResult("agentbox.read.action.finishable", "Loaded current action completion status", {
-      data: await this.client.canFinishCurrentAction(roleWallet),
+      data: {
+        ...finishable,
+        stateName: roleStateNameFromValue(finishable.state),
+      },
     });
   }
 
@@ -680,10 +691,115 @@ export class JSPlayerRuntime {
     if (!item || typeof item !== "object") return item;
     const x = item.x;
     const y = item.y;
+    const resourceType = Number(item.resourceType ?? item.resource_type ?? 0);
     return {
       ...item,
+      ...(resourceType > 0 ? { resourceTypeName: resourceNameFromId(resourceType) } : {}),
       coordinate: x !== undefined && y !== undefined ? { x, y } : null,
       coordinateLabel: x !== undefined && y !== undefined ? `(${x}, ${y})` : null,
+    };
+  }
+
+  annotateRoleIdentity(identity = {}) {
+    return {
+      ...identity,
+      roleLabel: identity?.roleId != null ? `Role #${identity.roleId}` : "unknown_role",
+    };
+  }
+
+  annotateRoleState(role = {}) {
+    return {
+      ...role,
+      stateName: roleStateNameFromValue(role.state),
+    };
+  }
+
+  annotateActionState(action = {}) {
+    return {
+      ...action,
+      ...(Number(action.craftingRecipeId || 0) > 0 ? {
+        craftingRecipeName: recipeNameFromId(action.craftingRecipeId),
+      } : {}),
+      ...(Number(action.learningTargetId || 0) > 0 && action.learningIsNPC ? {
+        learningNpcName: npcNameFromId(action.learningTargetId),
+      } : {}),
+      ...(Number(action.learningSkillId || 0) > 0 ? {
+        learningSkillName: skillNameFromId(action.learningSkillId),
+      } : {}),
+      ...(Number(action.teachingSkillId || 0) > 0 ? {
+        teachingSkillName: skillNameFromId(action.teachingSkillId),
+      } : {}),
+    };
+  }
+
+  annotateResourceBalances(items = []) {
+    return items.map((item) => ({
+      ...item,
+      resourceName: resourceNameFromId(item.tokenId),
+    }));
+  }
+
+  annotateSkills(items = []) {
+    return items.map((item) => ({
+      ...item,
+      skillName: skillNameFromId(item.skillId),
+    }));
+  }
+
+  annotateEquipped(items = []) {
+    return items.map((item) => ({
+      ...item,
+      slotName: slotNameFromId(item.slot),
+      equipmentName: equipmentNameFromId(item.equipmentId),
+    }));
+  }
+
+  annotateOwnedEquipments(items = []) {
+    return items.map((item) => ({
+      ...item,
+      slotName: slotNameFromId(item.slot),
+      equipmentName: equipmentNameFromId(item.equipmentId),
+    }));
+  }
+
+  annotateNpc(item = {}) {
+    const npcId = Number(item.npcId || 0);
+    const skillId = Number(item.skillId || 0);
+    return {
+      ...item,
+      ...(npcId > 0 ? { npcName: npcNameFromId(npcId) } : {}),
+      ...(skillId > 0 ? { taughtSkillName: skillNameFromId(skillId) } : {}),
+    };
+  }
+
+  annotateRecipe(item = {}) {
+    const requiredResources = [...(item.requiredResources || [])];
+    const requiredSkill = Number(item.requiredSkill || 0);
+    const outputEquipmentId = Number(item.outputEquipmentId || 0);
+    return {
+      ...item,
+      ...(Number(item.recipeId || 0) > 0 ? { recipeName: recipeNameFromId(item.recipeId) } : {}),
+      requiredResourceNames: requiredResources.map((tokenId) => resourceNameFromId(tokenId)),
+      ...(requiredSkill > 0 ? { requiredSkillName: skillNameFromId(requiredSkill) } : {}),
+      ...(outputEquipmentId > 0 ? { outputEquipmentName: equipmentNameFromId(outputEquipmentId) } : {}),
+    };
+  }
+
+  annotateEquipment(item = {}) {
+    const equipmentId = Number(item.equipmentId || 0);
+    const slot = Number(item.slot || 0);
+    return {
+      ...item,
+      ...(equipmentId > 0 ? { equipmentName: equipmentNameFromId(equipmentId) } : {}),
+      ...(slot > 0 ? { slotName: slotNameFromId(slot) } : {}),
+    };
+  }
+
+  annotateNearbyRole(item = {}) {
+    return {
+      ...item,
+      stateName: roleStateNameFromValue(item.state),
+      roleLabel: item?.roleId != null ? `Role #${item.roleId}` : "unknown_role",
     };
   }
 
@@ -756,7 +872,7 @@ export class JSPlayerRuntime {
     if (selected !== "chain") {
       try {
         const items = (await this.client.indexer.listNpcConfigs()).items || [];
-        worldState.all_npcs = items.map((item) => ({
+        worldState.all_npcs = items.map((item) => this.annotateNpc({
           npcId: Number(item.npc_id || 0),
           x: item.x,
           y: item.y,
@@ -768,7 +884,7 @@ export class JSPlayerRuntime {
       } catch {}
       try {
         const items = (await this.client.indexer.listRecipeConfigs()).items || [];
-        worldState.recipe_catalog = items.map((item) => ({
+        worldState.recipe_catalog = items.map((item) => this.annotateRecipe({
           recipeId: Number(item.recipe_id || 0),
           requiredResources: [...(item.resource_types || [])],
           requiredAmounts: [...(item.amounts || [])],
@@ -782,7 +898,7 @@ export class JSPlayerRuntime {
         const items = (await this.client.indexer.listEquipmentConfigs()).items || [];
         worldState.equipment_catalog = Object.fromEntries(items.filter((item) => Number(item.equipment_id || 0) > 0).map((item) => [
           Number(item.equipment_id || 0),
-          {
+          this.annotateEquipment({
             equipmentId: Number(item.equipment_id || 0),
             slot: Number(item.slot || 0),
             speedBonus: item.speed_bonus,
@@ -791,18 +907,18 @@ export class JSPlayerRuntime {
             maxHpBonus: item.max_hp_bonus,
             rangeBonus: item.range_bonus,
             updatedAtBlock: item.updated_at_block,
-          },
+          }),
         ]));
       } catch {}
       try {
         worldState.all_resource_lands = await this.listLands({ is_resource_point: true });
       } catch {}
     }
-    worldState.current_equipment = (me.equipped || []).filter((item) => Number(item.equipmentId || item.equipment_id || 0) > 0).map((item) => ({
+    worldState.current_equipment = this.annotateEquipped((me.equipped || []).filter((item) => Number(item.equipmentId || item.equipment_id || 0) > 0).map((item) => ({
       slot: Number(item.slot || 0),
       equipmentId: Number(item.equipmentId || item.equipment_id || 0),
       attributes: worldState.equipment_catalog[Number(item.equipmentId || item.equipment_id || 0)] || {},
-    }));
+    })));
     const recipeByOutput = {};
     for (const recipe of worldState.recipe_catalog) {
       const outputId = Number(recipe.outputEquipmentId || 0);
@@ -838,7 +954,7 @@ export class JSPlayerRuntime {
             x: (item.position || {}).x,
             y: (item.position || {}).y,
             state: item.state,
-          }));
+          })).map((item) => this.annotateNearbyRole(item));
         } catch {}
         try {
           const items = (await this.client.indexer.listLands(bounds)).items || [];
@@ -1122,9 +1238,11 @@ export class JSPlayerRuntime {
     return {
       role: roleWallet,
       state: me.role?.state,
+      stateName: roleStateNameFromValue(me.role?.state),
       canFinish: Boolean(finishable.canFinish),
       finishBlock: finishable.finishBlock,
       finishState: finishable.state,
+      finishStateName: roleStateNameFromValue(finishable.state),
     };
   }
 
@@ -1156,7 +1274,10 @@ export class JSPlayerRuntime {
       canExecute,
       currentLand,
       requiredSkillId: resourceType || null,
+      requiredSkillName: resourceType > 0 ? skillNameFromId(resourceType) : null,
+      resourceTypeName: resourceType > 0 ? resourceNameFromId(resourceType) : null,
       learnedSkillIds: [...learned].sort(),
+      learnedSkillNames: [...learned].sort((a, b) => a - b).map((item) => skillNameFromId(item)),
       reasons,
     };
   }
@@ -1190,7 +1311,17 @@ export class JSPlayerRuntime {
     if (npc?.isTeaching) reasons.push("npc_is_busy");
     if (!(requiredBlocks > 0)) reasons.push("skill_not_configured");
     if (skillId > 0 && learned.has(skillId)) reasons.push("skill_already_learned");
-    return { role: roleWallet, npcId, canExecute, npc, requiredSkillId: skillId || null, requiredBlocks, reasons };
+    return {
+      role: roleWallet,
+      npcId,
+      npcName: npcId ? npcNameFromId(npcId) : null,
+      canExecute,
+      npc: npc ? this.annotateNpc({ npcId, ...npc }) : null,
+      requiredSkillId: skillId || null,
+      requiredSkillName: skillId > 0 ? skillNameFromId(skillId) : null,
+      requiredBlocks,
+      reasons,
+    };
   }
 
   async checkCraftingPrerequisites(roleWallet, recipeId) {
@@ -1205,7 +1336,7 @@ export class JSPlayerRuntime {
         const tokenId = Number(recipe.requiredResources[i] || 0);
         const amount = Number(recipe.requiredAmounts[i] || 0);
         if ((balances[tokenId] || 0) < amount) {
-          missingResources.push({ tokenId, required: amount, current: balances[tokenId] || 0 });
+          missingResources.push({ tokenId, resourceName: resourceNameFromId(tokenId), required: amount, current: balances[tokenId] || 0 });
         }
       }
     }
@@ -1215,7 +1346,16 @@ export class JSPlayerRuntime {
     if (normalizeRoleState(me.role?.state) !== ROLE_STATE_IDLE) reasons.push("role_is_not_idle");
     if (recipe && !learned.has(Number(recipe.requiredSkill || 0))) reasons.push("required_skill_not_learned");
     if (missingResources.length) reasons.push("missing_resources");
-    return { role: roleWallet, recipeId, canExecute, recipe, missingResources, reasons };
+    return {
+      role: roleWallet,
+      recipeId,
+      recipeName: recipeId ? recipeNameFromId(recipeId) : null,
+      canExecute,
+      recipe,
+      requiredSkillName: Number(recipe?.requiredSkill || 0) > 0 ? skillNameFromId(recipe.requiredSkill) : null,
+      missingResources,
+      reasons,
+    };
   }
 
   async checkTriggerMintPrerequisites(roleWallet) {
@@ -1291,6 +1431,7 @@ export class JSPlayerRuntime {
     return {
       role: roleWallet,
       state: dynamic.role?.state,
+      stateName: dynamic.role?.stateName || roleStateNameFromValue(dynamic.role?.state),
       position: { x: dynamic.role?.x, y: dynamic.role?.y },
       finishable: dynamic.finishable,
       balances: dynamic.balances,
@@ -1314,6 +1455,7 @@ export class JSPlayerRuntime {
     return {
       currentBlock: dynamicInfo.current_block,
       currentLand: dynamicInfo.current_land,
+      currentLandResourceTypeName: dynamicInfo.current_land?.resourceTypeName || null,
       nearbyRoleCount: (dynamicInfo.nearby_roles || []).length,
       nearbyLandCount: (dynamicInfo.nearby_lands || []).length,
       landsWithGroundTokensCount: (dynamicInfo.lands_with_ground_tokens || []).length,

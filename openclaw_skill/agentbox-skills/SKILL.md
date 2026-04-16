@@ -17,10 +17,11 @@ Refer to the contract source when needed:
 This skill provides the OpenClaw agent with Agentbox state reads, prerequisite checks, and onchain action execution.
 The tools are grouped into reads, checks, and writes.
 If a tool omits the `role` parameter, it now uses the locally stored `active roleWallet`; it no longer guesses the owner's last role automatically.
+When speaking to end users, prefer semantic names instead of directly repeating `skillId / recipeId / npcId / equipmentId / slot`. Only include IDs in parentheses for debugging, config verification, or when the user explicitly asks for them.
 
 ## Common ID semantics
 
-Use the following built-in meanings when reading Agentbox data.
+Use the following built-in meanings when reading Agentbox data. These mappings are primarily for internal understanding, debugging, and config verification; do not repeat them verbatim to end users by default.
 
 ### Skills
 

@@ -17,6 +17,58 @@ export const PAGE_SIZE = 200;
 export const DEFAULT_SIGNER_LABEL = "local-gameplay-signer";
 export const LAND_COORDINATE_NOTE = "Coordinates are always ordered as (x, y). Do not infer x/y by splitting the digits of landId.";
 
+const SKILL_NAME_BY_ID = {
+  1: "Woodcutting",
+  2: "Husbandry",
+  3: "Mining",
+  4: "Bow crafting",
+  5: "Armor crafting",
+  6: "Shoes crafting",
+};
+
+const RESOURCE_NAME_BY_ID = {
+  1: "wood",
+  2: "wool",
+  3: "stone",
+};
+
+const ROLE_STATE_NAME_BY_ID = {
+  [ROLE_STATE_IDLE]: "Idle",
+  [ROLE_STATE_LEARNING]: "Learning",
+  [ROLE_STATE_TEACHING]: "Teaching",
+  [ROLE_STATE_CRAFTING]: "Crafting",
+  [ROLE_STATE_GATHERING]: "Gathering",
+  [ROLE_STATE_TELEPORTING]: "Teleporting",
+  [ROLE_STATE_PENDING_SPAWN]: "PendingSpawn",
+};
+
+const SLOT_NAME_BY_ID = {
+  1: "Weapon",
+  2: "Armor",
+  3: "Shoes",
+};
+
+const EQUIPMENT_NAME_BY_ID = {
+  1001: "Bow",
+  1002: "Armor",
+  1003: "Shoes",
+};
+
+const RECIPE_NAME_BY_ID = {
+  1: "Bow crafting recipe",
+  2: "Armor crafting recipe",
+  3: "Shoes crafting recipe",
+};
+
+const NPC_NAME_BY_ID = {
+  1: "Lumberjack",
+  2: "Shepherd",
+  3: "Miner",
+  4: "Bow crafting teacher",
+  5: "Armor crafting teacher",
+  6: "Shoes crafting teacher",
+};
+
 export const ADDRESS = { type: "string", description: "EVM address" };
 export const UINT = { type: "integer", minimum: 0 };
 export const STRING = { type: "string" };
@@ -58,6 +110,45 @@ export function normalizeRoleState(value) {
   }
   const numeric = Number(value);
   return Number.isNaN(numeric) ? null : numeric;
+}
+
+function unknownSemantic(prefix, id) {
+  return id == null || id === "" ? `unknown_${prefix}` : `unknown_${prefix}_${id}`;
+}
+
+export function skillNameFromId(skillId) {
+  const id = Number(skillId);
+  return SKILL_NAME_BY_ID[id] || unknownSemantic("skill", skillId);
+}
+
+export function resourceNameFromId(resourceId) {
+  const id = Number(resourceId);
+  return RESOURCE_NAME_BY_ID[id] || unknownSemantic("resource", resourceId);
+}
+
+export function roleStateNameFromValue(state) {
+  const normalized = normalizeRoleState(state);
+  return ROLE_STATE_NAME_BY_ID[normalized] || unknownSemantic("state", state);
+}
+
+export function slotNameFromId(slot) {
+  const id = Number(slot);
+  return SLOT_NAME_BY_ID[id] || unknownSemantic("slot", slot);
+}
+
+export function equipmentNameFromId(equipmentId) {
+  const id = Number(equipmentId);
+  return EQUIPMENT_NAME_BY_ID[id] || unknownSemantic("equipment", equipmentId);
+}
+
+export function recipeNameFromId(recipeId) {
+  const id = Number(recipeId);
+  return RECIPE_NAME_BY_ID[id] || unknownSemantic("recipe", recipeId);
+}
+
+export function npcNameFromId(npcId) {
+  const id = Number(npcId);
+  return NPC_NAME_BY_ID[id] || unknownSemantic("npc", npcId);
 }
 
 export class AgentboxPluginError extends Error {
