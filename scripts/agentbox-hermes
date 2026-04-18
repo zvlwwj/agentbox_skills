@@ -1,0 +1,292 @@
+#!/usr/bin/env node
+
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { hermesDataDir } from "../runtime/common.js";
+import { JSPlayerRuntime } from "../runtime/player-runtime.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PLUGIN_ROOT = path.resolve(__dirname, "..");
+
+const HERMES_AGENTBOX_HOME = process.env.AGENTBOX_HERMES_HOME || hermesDataDir();
+
+function usage() {
+  return `Usage:
+  agentbox-hermes signer prepare [--label LABEL] [--force] [--backup-confirmed] [--confirm-signer-replacement]
+  agentbox-hermes signer import --private-key KEY [--label LABEL] [--force] [--backup-confirmed] [--confirm-signer-replacement]
+  agentbox-hermes signer export
+  agentbox-hermes signer read
+
+  agentbox-hermes registration confirm [--profile-mode MODE] [--nickname NAME] [--gender ID]
+
+  agentbox-hermes roles list-owned
+  agentbox-hermes roles read-active
+  agentbox-hermes roles select-active [--role-wallet ADDRESS | --role-id ID]
+  agentbox-hermes roles clear-active
+
+  agentbox-hermes read role-snapshot [--role ADDRESS] [--source auto|chain|indexer]
+  agentbox-hermes read world-static [--role ADDRESS] [--source auto|chain|indexer]
+  agentbox-hermes read world-dynamic [--role ADDRESS] [--source auto|chain|indexer]
+  agentbox-hermes read land [--land-id ID | --x X --y Y] [--source auto|chain|indexer]
+  agentbox-hermes read last-mint
+  agentbox-hermes read global-config [--source auto|chain|indexer]
+
+  agentbox-hermes check gather [--role ADDRESS] --amount N
+  agentbox-hermes check learn [--role ADDRESS] --npc-id ID
+  agentbox-hermes check craft [--role ADDRESS] --recipe-id ID
+  agentbox-hermes check finishable [--role ADDRESS]
+  agentbox-hermes check trigger-mint [--role ADDRESS]
+  agentbox-hermes check stabilize [--role ADDRESS]
+
+  agentbox-hermes action move [--role ADDRESS] --x X --y Y
+  agentbox-hermes action teleport [--role ADDRESS] --x X --y Y
+  agentbox-hermes action learn [--role ADDRESS] --npc-id ID
+  agentbox-hermes action gather [--role ADDRESS] --amount N
+  agentbox-hermes action craft [--role ADDRESS] --recipe-id ID
+  agentbox-hermes action finish [--role ADDRESS]
+  agentbox-hermes action cancel [--role ADDRESS]
+  agentbox-hermes action equip [--role ADDRESS] --equipment-id ID
+  agentbox-hermes action unequip [--role ADDRESS] --slot ID
+  agentbox-hermes action trigger-mint
+  agentbox-hermes action stabilize [--role ADDRESS]
+  agentbox-hermes action transfer [--role ADDRESS] --amount N
+
+Options:
+  --pretty           Pretty-print JSON (default)
+  --compact          Compact JSON
+  --help             Show this help
+`;
+}
+
+function parseCli(argv) {
+  const positional = [];
+  const flags = {};
+  for (let index = 0; index < argv.length; index += 1) {
+    const item = argv[index];
+    if (!item.startsWith("--")) {
+      positional.push(item);
+      continue;
+    }
+    const key = item.slice(2);
+    if (!key) continue;
+    const next = argv[index + 1];
+    if (next && !next.startsWith("--")) {
+      flags[key] = next;
+      index += 1;
+    } else {
+      flags[key] = true;
+    }
+  }
+  return { positional, flags };
+}
+
+function requireFlag(flags, name) {
+  const value = flags[name];
+  if (value === undefined || value === null || value === true || value === "") {
+    throw new Error(`Missing required flag --${name}`);
+  }
+  return value;
+}
+
+function optionalInt(flags, name) {
+  if (!(name in flags)) return undefined;
+  const value = Number(flags[name]);
+  if (!Number.isFinite(value)) throw new Error(`Invalid integer for --${name}`);
+  return value;
+}
+
+function optionalString(flags, name) {
+  if (!(name in flags)) return undefined;
+  const value = flags[name];
+  return value === true ? undefined : value;
+}
+
+function boolFlag(flags, name) {
+  return Boolean(flags[name]);
+}
+
+function buildInvocation(positional, flags) {
+  const [group, command] = positional;
+  if (!group || flags.help) return null;
+
+  switch (group) {
+    case "signer":
+      switch (command) {
+        case "prepare":
+          return {
+            toolName: "agentbox.signer.prepare",
+            payload: {
+              label: optionalString(flags, "label"),
+              force: boolFlag(flags, "force"),
+              backupConfirmed: boolFlag(flags, "backup-confirmed"),
+              confirmSignerReplacement: boolFlag(flags, "confirm-signer-replacement"),
+            },
+          };
+        case "import":
+          return {
+            toolName: "agentbox.signer.import",
+            payload: {
+              privateKey: requireFlag(flags, "private-key"),
+              label: optionalString(flags, "label"),
+              force: boolFlag(flags, "force"),
+              backupConfirmed: boolFlag(flags, "backup-confirmed"),
+              confirmSignerReplacement: boolFlag(flags, "confirm-signer-replacement"),
+            },
+          };
+        case "export":
+          return { toolName: "agentbox.signer.export", payload: {} };
+        case "read":
+          return { toolName: "agentbox.signer.read", payload: {} };
+        default:
+          throw new Error(`Unknown signer command: ${command || "(missing)"}`);
+      }
+    case "roles":
+      switch (command) {
+        case "list-owned":
+          return { toolName: "agentbox.roles.list_owned", payload: {} };
+        case "read-active":
+          return { toolName: "agentbox.roles.read_active", payload: {} };
+        case "select-active":
+          return {
+            toolName: "agentbox.roles.select_active",
+            payload: {
+              roleWallet: optionalString(flags, "role-wallet"),
+              roleId: optionalInt(flags, "role-id"),
+            },
+          };
+        case "clear-active":
+          return { toolName: "agentbox.roles.clear_active", payload: {} };
+        default:
+          throw new Error(`Unknown roles command: ${command || "(missing)"}`);
+      }
+    case "read":
+      switch (command) {
+        case "role-snapshot":
+          return { toolName: "agentbox.skills.read_role_snapshot", payload: { role: optionalString(flags, "role"), source: optionalString(flags, "source") } };
+        case "world-static":
+          return { toolName: "agentbox.skills.read_world_static_info", payload: { role: optionalString(flags, "role"), source: optionalString(flags, "source") } };
+        case "world-dynamic":
+          return { toolName: "agentbox.skills.read_world_dynamic_info", payload: { role: optionalString(flags, "role"), source: optionalString(flags, "source") } };
+        case "land":
+          return {
+            toolName: "agentbox.skills.read_land",
+            payload: {
+              landId: optionalInt(flags, "land-id"),
+              x: optionalInt(flags, "x"),
+              y: optionalInt(flags, "y"),
+              source: optionalString(flags, "source"),
+            },
+          };
+        case "last-mint":
+          return { toolName: "agentbox.skills.read_last_mint", payload: {} };
+        case "global-config":
+          return { toolName: "agentbox.skills.read_global_config", payload: { source: optionalString(flags, "source") } };
+        default:
+          throw new Error(`Unknown read command: ${command || "(missing)"}`);
+      }
+    case "check":
+      switch (command) {
+        case "gather":
+          return { toolName: "agentbox.skills.check_gather_prerequisites", payload: { role: optionalString(flags, "role"), amount: Number(requireFlag(flags, "amount")) } };
+        case "learn":
+          return { toolName: "agentbox.skills.check_learning_prerequisites", payload: { role: optionalString(flags, "role"), npcId: Number(requireFlag(flags, "npc-id")) } };
+        case "craft":
+          return { toolName: "agentbox.skills.check_crafting_prerequisites", payload: { role: optionalString(flags, "role"), recipeId: Number(requireFlag(flags, "recipe-id")) } };
+        case "finishable":
+          return { toolName: "agentbox.skills.check_finishable", payload: { role: optionalString(flags, "role") } };
+        case "trigger-mint":
+          return { toolName: "agentbox.skills.check_trigger_mint_prerequisites", payload: { role: optionalString(flags, "role") } };
+        case "stabilize":
+          return { toolName: "agentbox.skills.check_stabilize_prerequisites", payload: { role: optionalString(flags, "role") } };
+        default:
+          throw new Error(`Unknown check command: ${command || "(missing)"}`);
+      }
+    case "action":
+      switch (command) {
+        case "move":
+          return { toolName: "agentbox.skills.move.instant", payload: { role: optionalString(flags, "role"), x: Number(requireFlag(flags, "x")), y: Number(requireFlag(flags, "y")) } };
+        case "teleport":
+          return { toolName: "agentbox.skills.teleport.start", payload: { role: optionalString(flags, "role"), x: Number(requireFlag(flags, "x")), y: Number(requireFlag(flags, "y")) } };
+        case "learn":
+          return { toolName: "agentbox.skills.learn.npc.start", payload: { role: optionalString(flags, "role"), npcId: Number(requireFlag(flags, "npc-id")) } };
+        case "gather":
+          return { toolName: "agentbox.skills.gather.start", payload: { role: optionalString(flags, "role"), amount: Number(requireFlag(flags, "amount")) } };
+        case "craft":
+          return { toolName: "agentbox.skills.craft.start", payload: { role: optionalString(flags, "role"), recipeId: Number(requireFlag(flags, "recipe-id")) } };
+        case "finish":
+          return { toolName: "agentbox.skills.finish_current_action", payload: { role: optionalString(flags, "role") } };
+        case "cancel":
+          return { toolName: "agentbox.skills.cancel_current_action", payload: { role: optionalString(flags, "role") } };
+        case "equip":
+          return { toolName: "agentbox.skills.equip.put_on", payload: { role: optionalString(flags, "role"), equipmentId: Number(requireFlag(flags, "equipment-id")) } };
+        case "unequip":
+          return { toolName: "agentbox.skills.equip.take_off", payload: { role: optionalString(flags, "role"), slot: Number(requireFlag(flags, "slot")) } };
+        case "trigger-mint":
+          return { toolName: "agentbox.skills.trigger_mint", payload: {} };
+        case "stabilize":
+          return { toolName: "agentbox.skills.stabilize_balance", payload: { role: optionalString(flags, "role") } };
+        case "transfer":
+          return { toolName: "agentbox.skills.transfer_agc_to_owner", payload: { role: optionalString(flags, "role"), amount: Number(requireFlag(flags, "amount")) } };
+        default:
+          throw new Error(`Unknown action command: ${command || "(missing)"}`);
+      }
+    default:
+      if (group === "registration") {
+        switch (command) {
+          case "confirm":
+            return {
+              toolName: "agentbox.registration.confirm",
+              payload: {
+                profileMode: optionalString(flags, "profile-mode"),
+                nickname: optionalString(flags, "nickname"),
+                gender: optionalInt(flags, "gender"),
+              },
+            };
+          default:
+            throw new Error(`Unknown registration command: ${command || "(missing)"}`);
+        }
+      }
+      throw new Error(`Unknown command group: ${group}`);
+  }
+}
+
+async function main() {
+  const { positional, flags } = parseCli(process.argv.slice(2));
+  if (!positional.length || flags.help) {
+    process.stdout.write(usage());
+    process.exit(0);
+  }
+
+  fs.mkdirSync(HERMES_AGENTBOX_HOME, { recursive: true });
+  const runtime = new JSPlayerRuntime(PLUGIN_ROOT, {
+    settings: {
+      dataDir: HERMES_AGENTBOX_HOME,
+    },
+  });
+
+  try {
+    const invocation = buildInvocation(positional, flags);
+    if (!invocation) {
+      process.stdout.write(usage());
+      process.exit(0);
+    }
+    const result = await runtime.invoke(invocation.toolName, invocation.payload);
+    const output = flags.compact ? JSON.stringify(result) : JSON.stringify(result, null, 2);
+    process.stdout.write(`${output}\n`);
+    process.exit(result.ok ? 0 : 1);
+  } catch (error) {
+    const payload = {
+      ok: false,
+      errorCode: "CLI_USAGE_ERROR",
+      errorMessage: error?.message || String(error),
+      usage: usage(),
+    };
+    process.stderr.write(`${JSON.stringify(payload, null, 2)}\n`);
+    process.exit(2);
+  }
+}
+
+await main();

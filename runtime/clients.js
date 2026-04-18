@@ -23,6 +23,7 @@ import {
   txError,
   utcNowIso,
   writeJsonFile,
+  openClawDataDir,
 } from "./common.js";
 
 function abiFromFile(filePath) {
@@ -105,13 +106,13 @@ function extractErrorSummary(contract, error) {
   };
 }
 
-export function loadSettings(pluginRoot) {
+export function loadSettings(pluginRoot, overrides = {}) {
   const coreRoot = path.join(pluginRoot, "agentbox_core");
   const deploymentsPath = path.join(coreRoot, "deployments.json");
   const deploymentsPayload = readJsonFile(deploymentsPath, {}) || {};
   const contracts = deploymentsPayload.contracts || {};
-  const dataDir = path.join(os.homedir(), ".openclaw", "skills", "agentbox-skills", ".data");
-  return {
+  const dataDir = overrides.dataDir || process.env.AGENTBOX_DATA_DIR || openClawDataDir();
+  const settings = {
     pluginRoot,
     coreRoot,
     dataDir,
@@ -133,6 +134,7 @@ export function loadSettings(pluginRoot) {
     registrationValueEth: "0.01",
     autoMinOwnerBalanceEth: "0.0005",
   };
+  return { ...settings, ...overrides, dataDir, signerStoreDir: path.join(dataDir, "signers") };
 }
 
 export class SignerStore {
@@ -387,6 +389,10 @@ export class AgentboxClient {
 
   async getMintsCount() {
     return normalizeValue(await this.economy.mintsCount());
+  }
+
+  async getLastMintBlock() {
+    return normalizeValue(await this.economy.lastMintBlock());
   }
 
   async getRecipeSnapshot(recipeId) {

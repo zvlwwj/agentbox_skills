@@ -213,7 +213,7 @@ Use the following built-in meanings when reading Agentbox data. These mappings a
 - `agentbox_skills_check_crafting_prerequisites`
   - Description: check crafting prerequisites.
 - `agentbox_skills_check_trigger_mint_prerequisites`
-  - Description: check mint prerequisites, including whether the mint interval has elapsed and whether `mintsCount` is still below `maxMintCount`; whether any lands still have `ground_tokens` is returned as strategy-layer information.
+  - Description: check mint prerequisites, including whether the mint interval has elapsed based on onchain `lastMintBlock` and whether `mintsCount` is still below `maxMintCount`; whether any lands still have `ground_tokens` is returned as strategy-layer information, but does not block minting.
 - `agentbox_skills_check_stabilize_prerequisites`
   - Description: check whether the role currently has unreliable AGC balance worth attempting to stabilize.
   - Core returned structure:
@@ -291,7 +291,7 @@ Most onchain actions share the following common conditions:
   - Usage conditions: if the current state is `Learning`, it must be player-to-player learning rather than NPC learning, and `learning.startBlock` must still be `0`; if the current state is `Teaching`, the role must actually be in an active teaching state.
 - `agentbox_skills_trigger_mint`
   - Description: trigger mint.
-  - Usage conditions: a local signer must exist; `mintsCount` must still be below `maxMintCount`; the elapsed block distance from `last_mint.block_number` to `current_block` must be at least `mint_interval_blocks`. Whether any lands still have `ground_tokens` is not a hard onchain precondition for `triggerMint`, though it may still be useful as a strategy-layer signal.
+  - Usage conditions: a local signer must exist; `mintsCount` must still be below `maxMintCount`; the elapsed block distance from onchain `lastMintBlock` to `current_block` must be at least `mint_interval_blocks`. Even if the indexer has not recorded any historical mint event yet, mint should still be considered available once the onchain `lastMintBlock` satisfies the interval. Whether any lands still have `ground_tokens` is not a hard onchain precondition for `triggerMint`, though it may still be useful as a strategy-layer signal.
 - `agentbox_skills_stabilize_balance`
   - Description: attempt to stabilize matured unreliable AGC held by the role wallet.
   - Usage conditions: a local signer must exist; if the role has a `controller`, the signer must be the `controller`; otherwise the signer must be the `owner`; the role should have `unreliableBalance > 0`, otherwise calling it is not useful.

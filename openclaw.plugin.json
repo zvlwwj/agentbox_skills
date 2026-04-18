@@ -4,7 +4,8 @@
   "description": "OpenClaw plugin that exposes Agentbox signer, registration, read, check, summary, and gameplay tools.",
   "version": "0.3.0",
   "skills": [
-    "./openclaw_skill/agentbox-skills"
+    "./openclaw_skill/agentbox-skills",
+    "./openclaw_skill/agentbox-cron-orchestrator"
   ],
   "contracts": {
     "tools": [

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 from pathlib import Path
@@ -49,14 +50,31 @@ def _restart_gateway() -> None:
     subprocess.run(["openclaw", "gateway", "restart"], check=True)
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Install the agentbox-skills plugin into local OpenClaw."
+    )
+    parser.add_argument(
+        "--no-restart",
+        action="store_true",
+        help="Install and enable the plugin, but do not restart the OpenClaw gateway.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
     _detach_legacy_skill_entry()
     _install_plugin()
     _ensure_plugin_allowlist()
-    _restart_gateway()
+    if not args.no_restart:
+        _restart_gateway()
     print(f"Installed plugin from {REPO_ROOT}")
     print("Preserved runtime data, OpenClaw session history, and local workspace directories")
-    print("Restarted OpenClaw gateway")
+    if args.no_restart:
+        print("Skipped OpenClaw gateway restart; restart manually when you want the updated plugin to load")
+    else:
+        print("Restarted OpenClaw gateway")
 
 
 if __name__ == "__main__":

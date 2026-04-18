@@ -97,7 +97,7 @@ export function buildToolSpecs() {
     { name: "agentbox.skills.check_gather_prerequisites", description: "Check whether gathering can start on the current land.", parameters: obj({ role: ROLE, amount: UINT }, ["role", "amount"]) },
     { name: "agentbox.skills.check_learning_prerequisites", description: "Check whether learning from an NPC can start now.", parameters: obj({ role: ROLE, npcId: UINT }, ["role", "npcId"]) },
     { name: "agentbox.skills.check_crafting_prerequisites", description: "Check whether crafting a recipe can start now.", parameters: obj({ role: ROLE, recipeId: UINT }, ["role", "recipeId"]) },
-    { name: "agentbox.skills.check_trigger_mint_prerequisites", description: "Check whether the token mint interval has elapsed and no ground tokens remain on the map.", parameters: obj({ role: ROLE }) },
+    { name: "agentbox.skills.check_trigger_mint_prerequisites", description: "Check whether the token mint interval has elapsed and mintsCount is still below maxMintCount. Existing ground tokens are returned as strategy information, not a hard blocker.", parameters: obj({ role: ROLE }) },
     { name: "agentbox.skills.check_stabilize_prerequisites", description: "Check whether the role currently has unreliable AGC worth attempting to stabilize.", parameters: obj({ role: ROLE }, ["role"]) },
     { name: "agentbox.skills.summarize_role_state", description: "Summarize the current role state for dialogue planning.", parameters: obj({ role: ROLE }, ["role"]) },
     { name: "agentbox.skills.summarize_world_static_info", description: "Summarize lower-frequency world facts for dialogue planning.", parameters: obj({ role: ROLE }, ["role"]) },
@@ -106,8 +106,8 @@ export function buildToolSpecs() {
 }
 
 export class JSPlayerRuntime {
-  constructor(pluginRoot) {
-    this.settings = loadSettings(pluginRoot);
+  constructor(pluginRoot, options = {}) {
+    this.settings = loadSettings(pluginRoot, options.settings || {});
     this.pluginRoot = pluginRoot;
     this.client = new AgentboxClient(this.settings);
     this.signers = new SignerStore(this.settings);
@@ -1361,7 +1361,18 @@ export class JSPlayerRuntime {
   async checkTriggerMintPrerequisites(roleWallet) {
     const resolvedRole = roleWallet || await this.resolveDefaultRole();
     if (!resolvedRole) {
-      return { canExecute: false, currentBlock: null, mintIntervalBlocks: null, maxMintCount: null, mintsCount: null, lastMint: null, landsWithGroundTokensCount: null, reasons: ["missing_role"] };
+      return {
+        canExecute: false,
+        currentBlock: null,
+        mintIntervalBlocks: null,
+        maxMintCount: null,
+        mintsCount: null,
+        lastMint: null,
+        chainLastMintBlock: null,
+        effectiveLastMintBlock: null,
+        landsWithGroundTokensCount: null,
+        reasons: ["missing_role"],
+      };
     }
     const world = await this.buildWorldInfo(resolvedRole);
     const currentBlock = world.dynamicInfo?.current_block;
@@ -1369,16 +1380,23 @@ export class JSPlayerRuntime {
     const mintIntervalBlocks = world.staticInfo?.mint_interval_blocks;
     const maxMintCount = world.staticInfo?.max_mint_count;
     let mintsCount = null;
+    let chainLastMintBlock = null;
     try {
       mintsCount = Number(await this.client.getMintsCount());
     } catch {}
+    try {
+      const value = await this.client.getLastMintBlock();
+      chainLastMintBlock = value == null ? null : Number(value);
+    } catch {}
     const landsWithGroundTokens = world.dynamicInfo?.lands_with_ground_tokens || [];
-    const enoughBlocks = currentBlock != null && mintIntervalBlocks != null && lastMint.block_number != null && Number(currentBlock) - Number(lastMint.block_number) >= Number(mintIntervalBlocks);
+    const indexedLastMintBlock = lastMint.block_number != null ? Number(lastMint.block_number) : null;
+    const effectiveLastMintBlock = chainLastMintBlock ?? indexedLastMintBlock;
+    const enoughBlocks = currentBlock != null && mintIntervalBlocks != null && effectiveLastMintBlock != null && Number(currentBlock) - Number(effectiveLastMintBlock) >= Number(mintIntervalBlocks);
     const belowMaxMintCount = maxMintCount == null || mintsCount == null ? true : Number(mintsCount) < Number(maxMintCount);
     const reasons = [];
     if (!enoughBlocks) reasons.push("mint_interval_not_elapsed");
     if (!belowMaxMintCount) reasons.push("max_mint_count_reached");
-    if (landsWithGroundTokens.length > 0) reasons.push("ground_tokens_already_present");
+    if (landsWithGroundTokens.length > 0) reasons.push("ground_tokens_present_strategy_signal");
     return {
       canExecute: enoughBlocks && belowMaxMintCount,
       currentBlock,
@@ -1386,6 +1404,8 @@ export class JSPlayerRuntime {
       maxMintCount,
       mintsCount,
       lastMint,
+      chainLastMintBlock,
+      effectiveLastMintBlock,
       landsWithGroundTokensCount: landsWithGroundTokens.length,
       reasons,
     };

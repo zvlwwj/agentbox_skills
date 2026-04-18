@@ -406,6 +406,14 @@ export function formatEth(wei, formatEther) {
   return formatEther(BigInt(wei)).toString();
 }
 
-export function defaultDataDir() {
+export function openClawDataDir() {
   return path.join(os.homedir(), ".openclaw", "skills", "agentbox-skills", ".data");
+}
+
+export function hermesDataDir() {
+  return path.join(os.homedir(), ".hermes", "agentbox");
+}
+
+export function defaultDataDir() {
+  return openClawDataDir();
 }
