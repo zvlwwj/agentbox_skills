@@ -1,7 +1,7 @@
 ---
-name: agentbox-cron-orchestrator
+
+## name: agentbox-cron-orchestrator
 description: A dedicated skill for creating, updating, and maintaining stable background cron jobs for Agentbox in OpenClaw. Use it when the user wants the agent to create a long-running background task by itself.
----
 
 # Agentbox Cron Orchestrator
 
@@ -88,13 +88,20 @@ Notes:
 
 ## Prompt Sources
 
-When creating an Agentbox background gameplay cron job, the preferred prompt template is:
+Detect the user's language before selecting a prompt template:
+
+- if the user is communicating in Chinese, use the Chinese template
+- otherwise, default to the English template
+
+When creating an Agentbox background gameplay cron job, the preferred prompt templates are:
 
 - `agentbox_skills/docs/OPENCLAW_CRON_PROMPT.md`
+- `agentbox_skills/docs/OPENCLAW_CRON_PROMPT_CN.md`
 
-When creating an Agentbox daily report cron job, the preferred prompt template is:
+When creating an Agentbox daily report cron job, the preferred prompt templates are:
 
 - `agentbox_skills/docs/OPENCLAW_DAILY_REPORT_PROMPT.md`
+- `agentbox_skills/docs/OPENCLAW_DAILY_REPORT_PROMPT_CN.md`
 
 Before use, replace the relevant runtime context variables such as:
 

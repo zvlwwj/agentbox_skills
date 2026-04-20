@@ -142,12 +142,19 @@ Hermes cron 每次都是全新 session。
 
 ## Prompt 使用要求
 
+选择 prompt 模板前，需要先判断用户语言：
+
+- 如果用户当前主要使用中文交流，则使用中文模板
+- 否则默认使用英文模板
+
 创建 Hermes 后台运行 job 时，应优先使用：
 
+- `agentbox_skills/docs/HERMES_CRON_PROMPT.md`
 - `agentbox_skills/docs/HERMES_CRON_PROMPT_CN.md`
 
 创建 Hermes 游戏日报 job 时，应优先使用：
 
+- `agentbox_skills/docs/HERMES_DAILY_REPORT_PROMPT.md`
 - `agentbox_skills/docs/HERMES_DAILY_REPORT_PROMPT_CN.md`
 
 不要直接把 OpenClaw 版 prompt 原样搬过来。

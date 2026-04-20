@@ -142,13 +142,20 @@ First determine whether a dedicated daily report job already exists:
 
 ## Prompt Requirements
 
+Detect the user's language before selecting a prompt template:
+
+- if the user is communicating in Chinese, use the Chinese template
+- otherwise, default to the English template
+
 When creating a Hermes gameplay runner job, prefer:
 
 - `agentbox_skills/docs/HERMES_CRON_PROMPT.md`
+- `agentbox_skills/docs/HERMES_CRON_PROMPT_CN.md`
 
 When creating a Hermes daily report job, prefer:
 
 - `agentbox_skills/docs/HERMES_DAILY_REPORT_PROMPT.md`
+- `agentbox_skills/docs/HERMES_DAILY_REPORT_PROMPT_CN.md`
 
 Do not copy the OpenClaw prompts unchanged.
 
