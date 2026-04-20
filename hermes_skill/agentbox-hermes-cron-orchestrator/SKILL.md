@@ -22,6 +22,48 @@ This skill is responsible for:
   - `agentbox-background-runner`: continuously advances gameplay
   - `agentbox-daily-report`: generates a daily game report
 
+## cron job delivery
+
+For background Agentbox runner jobs, the recommended default is:
+
+- `deliver = "local"`
+
+Reason:
+
+- background gameplay loops usually should not proactively post high-frequency progress to external chat channels
+- this keeps routine execution quiet and avoids turning the runner into notification spam
+
+For daily report jobs, silent mode should not be the default.
+
+If the user does not explicitly say "do not send", the agent should first check whether a usable delivery route exists. The priority order should be:
+
+- first use the job's `origin` if it is already a valid deliverable source
+- if no usable `origin` exists, prefer a Hermes-configured home channel / home target
+- if the home target is unavailable, try another route that Hermes can already verify, has recently delivered through, or can infer directly from local state
+
+If a usable route exists, explicitly set:
+
+- `deliver = "<resolved_route>"`
+
+Where `<resolved_route>` may be:
+
+- `origin`
+- `telegram`
+- `discord`
+- `slack`
+- or any other Hermes-supported delivery platform
+
+If the selected route still requires extra target information, channel naming, or a concrete recipient, the agent should continue resolving that Hermes-side target automatically instead of asking the user to restate it.
+
+If the current route is missing a required target and local state cannot resolve it, try the next usable route.
+
+Only fall back to:
+
+- `deliver = "local"`
+
+after all candidate delivery routes fail to produce a valid deliverable path.
+
+
 ## Core Principles
 
 ### 1. Hermes fully owns background execution
@@ -60,6 +102,7 @@ Recommended defaults:
 
 - job name: `agentbox-background-runner`
 - schedule: `every 10m`
+- deliver: `local`
 - attached skills:
   - `agentbox-hermes-skills`
   - `agentbox-hermes-cron-orchestrator`
@@ -79,6 +122,9 @@ Recommended defaults:
 
 - job name: `agentbox-daily-report`
 - schedule: `every 24h`
+- deliver:
+  - if a usable delivery route exists, explicitly set the corresponding Hermes route
+  - otherwise fall back to `local`
 - attached skills:
   - `agentbox-hermes-skills`
   - `agentbox-hermes-cron-orchestrator`
@@ -89,6 +135,7 @@ Notes:
 
 - the daily report job should stay separate from the gameplay runner
 - the daily report job is mainly responsible for summarizing the last 24 hours of progress, outputs, and exceptions, rather than driving new on-chain actions
+- Hermes tracks `last_delivery_error` separately, so the daily report job should prioritize successful report generation first, then best-effort external delivery through Hermes' native delivery model
 
 ## Create/Update Priority
 
@@ -122,6 +169,7 @@ When creating, explicitly define:
 
 - job name
 - schedule
+- deliver
 - attached skills
 - prompt body
 
@@ -181,6 +229,9 @@ The stored state should at least include:
 - if the user simply wants stable background operation, create both the gameplay runner job and the daily report job by default
 - if the user simply wants stable background operation, default to `every 10m`
 - if the user asks for "generate a daily report every day", default to `every 24h`
+- background runner jobs should default to `deliver = local`
+- if the user does not explicitly say "do not send", daily report jobs should prefer finding a usable delivery route and explicitly setting `deliver`
+- if no delivery route can be resolved, daily report jobs should fall back to `local` instead of leaving delivery ambiguous
 
 ## Success Feedback
 
@@ -189,6 +240,7 @@ When the cron job is created or updated, tell the user:
 - whether it was created or updated
 - the job name
 - the schedule interval
+- the delivery strategy
 - which skills were attached
 - which prompt template was used
 - where the runtime state is persisted

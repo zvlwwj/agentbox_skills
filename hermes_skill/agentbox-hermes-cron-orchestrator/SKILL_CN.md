@@ -22,6 +22,45 @@ requires_tools: [terminal, read_file, cronjob]
   - `agentbox-background-runner`：负责持续推进游戏
   - `agentbox-daily-report`：负责每天生成游戏日报
 
+## cron job delivery
+
+对后台 Agentbox 运行任务，推荐：
+
+- `deliver = "local"`
+
+原因：
+
+- 后台推进任务通常不需要主动发到外部聊天渠道
+- 这样可以避免把高频巡航信息变成噪音
+
+对“游戏日报”任务，不建议默认静默。
+
+如果用户没有明确要求“不发送”，应先自动检查当前是否存在可用投递链路。优先顺序应固定为：
+
+- 先使用当前 job 的 `origin`，如果它本身就是一个可投递来源
+- 如果没有可用 `origin`，优先使用 Hermes 已配置的 home channel / home target
+- 如果 home target 不可用，再尝试 Hermes 本地状态中最近成功、已验证、或可直接解析的投递链路
+
+如果存在可用投递链路，应显式设置：
+
+- `deliver = "<resolved_route>"`
+
+其中 `<resolved_route>` 可以是：
+
+- `origin`
+- `telegram`
+- `discord`
+- `slack`
+- 或 Hermes 支持的其他可投递平台
+
+如果当前链路还要求额外目标地址、频道名或会话目标，agent 应继续自动补齐 Hermes 侧需要的目标信息，而不是要求用户重复提供。
+
+如果当前链路缺少必要目标且本地无法自动解析，应继续尝试下一个可投递链路。
+
+只有当所有候选投递链路都不可用时，才回退为：
+
+- `deliver = "local"`
+
 ## 核心原则
 
 ### 1. Hermes 自己全接管后台运行
@@ -60,6 +99,7 @@ Hermes cron 每次都是全新 session。
 
 - job 名称：`agentbox-background-runner`
 - schedule：`every 10m`
+- deliver：`local`
 - attached skills：
   - `agentbox-hermes-skills`
   - `agentbox-hermes-cron-orchestrator`
@@ -79,6 +119,9 @@ Hermes cron 每次都是全新 session。
 
 - job 名称：`agentbox-daily-report`
 - schedule：`every 24h`
+- deliver：
+  - 如果存在可用投递链路，显式设置为对应 Hermes delivery route
+  - 如果没有可用投递链路，则回退为 `local`
 - attached skills：
   - `agentbox-hermes-skills`
   - `agentbox-hermes-cron-orchestrator`
@@ -89,6 +132,7 @@ Hermes cron 每次都是全新 session。
 
 - 日报任务和后台运行任务需要分开
 - 日报任务主要负责汇总最近 24 小时的进展、产出和异常，而不是推进新的链上动作
+- Hermes 会单独记录 `last_delivery_error`，所以日报任务应优先保证“内容生成成功”，再尽力投递
 
 ## 创建或更新时的优先级
 
@@ -122,6 +166,7 @@ Hermes cron 每次都是全新 session。
 
 - job 名称
 - schedule
+- deliver
 - attached skills
 - prompt 内容
 
@@ -181,6 +226,9 @@ Hermes cron 每次都是全新 session。
 - 如果用户只说“后台稳定运行”，默认同时创建后台运行任务和日报任务
 - 如果用户只说“后台稳定运行”，默认采用 `every 10m`
 - 如果用户要求“每天生成日报”，默认采用 `every 24h`
+- 后台运行任务默认 `deliver = local`
+- 日报任务如果没有明确要求“不发送”，应优先寻找可投递链路并显式设置 `deliver`
+- 如果找不到任何可投递链路，日报任务应回退为 `local`，而不是为了强行投递而让 job 配置悬空
 
 ## 创建完成后的反馈
 
@@ -189,6 +237,7 @@ Hermes cron 每次都是全新 session。
 - 是新建还是更新
 - job 名称
 - 调度间隔
+- deliver 策略
 - 附加了哪些 skill
 - 使用的是哪份 prompt 模板
 - 状态文件写到哪里
