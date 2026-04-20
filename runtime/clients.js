@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { ethers } from "ethers";
 
 import {
@@ -23,13 +22,8 @@ import {
   txError,
   utcNowIso,
   writeJsonFile,
-  openClawDataDir,
 } from "./common.js";
-
-function abiFromFile(filePath) {
-  const payload = JSON.parse(fs.readFileSync(filePath, "utf8"));
-  return Array.isArray(payload) ? payload : payload.abi;
-}
+import { createAgentboxContracts } from "./contracts.js";
 
 function normalizeDiagnosticValue(value) {
   if (typeof value === "bigint") return value.toString();
@@ -104,37 +98,6 @@ function extractErrorSummary(contract, error) {
       revertArgs: decoded?.args ?? [],
     },
   };
-}
-
-export function loadSettings(pluginRoot, overrides = {}) {
-  const coreRoot = path.join(pluginRoot, "agentbox_core");
-  const deploymentsPath = path.join(coreRoot, "deployments.json");
-  const deploymentsPayload = readJsonFile(deploymentsPath, {}) || {};
-  const contracts = deploymentsPayload.contracts || {};
-  const dataDir = overrides.dataDir || process.env.AGENTBOX_DATA_DIR || openClawDataDir();
-  const settings = {
-    pluginRoot,
-    coreRoot,
-    dataDir,
-    signerStoreDir: path.join(dataDir, "signers"),
-    rpcUrl: "https://sepolia.base.org",
-    chainId: 84532,
-    coreAddress: contracts.Core_Diamond,
-    roleAddress: contracts.Role_NFT,
-    landAddress: contracts.Land_ERC721,
-    resourceAddress: contracts.Resource_ERC1155,
-    economyAddress: contracts.Economy_ERC20,
-    configAddress: contracts.Config,
-    randomizerAddress: contracts.Randomizer,
-    indexerBaseUrl: "https://api.agentbox.world/",
-    indexerTimeoutMs: 10000,
-    receiptConfirmations: 1,
-    txTimeoutSeconds: 120,
-    minNativeBalanceEth: "0.012",
-    registrationValueEth: "0.01",
-    autoMinOwnerBalanceEth: "0.0005",
-  };
-  return { ...settings, ...overrides, dataDir, signerStoreDir: path.join(dataDir, "signers") };
 }
 
 export class SignerStore {
@@ -304,13 +267,13 @@ export class AgentboxClient {
   constructor(settings) {
     this.settings = settings;
     this.provider = new ethers.JsonRpcProvider(settings.rpcUrl, settings.chainId, { staticNetwork: true });
-    const abiDir = path.join(settings.coreRoot, "abi");
-    this.core = new ethers.Contract(settings.coreAddress, abiFromFile(path.join(abiDir, "IAgentboxCore.json")), this.provider);
-    this.role = new ethers.Contract(settings.roleAddress, abiFromFile(path.join(abiDir, "AgentboxRole.json")), this.provider);
-    this.economy = new ethers.Contract(settings.economyAddress, abiFromFile(path.join(abiDir, "AgentboxEconomy.json")), this.provider);
-    this.config = new ethers.Contract(settings.configAddress, abiFromFile(path.join(abiDir, "AgentboxConfig.json")), this.provider);
-    this.resource = new ethers.Contract(settings.resourceAddress, abiFromFile(path.join(abiDir, "AgentboxResource.json")), this.provider);
-    this.roleWalletAbi = abiFromFile(path.join(abiDir, "AgentboxRoleWallet.json"));
+    const contracts = createAgentboxContracts(settings, this.provider);
+    this.core = contracts.core;
+    this.role = contracts.role;
+    this.economy = contracts.economy;
+    this.config = contracts.config;
+    this.resource = contracts.resource;
+    this.roleWalletAbi = contracts.roleWalletAbi;
     this.indexer = new IndexerClient(settings.indexerBaseUrl, settings.indexerTimeoutMs);
   }
 

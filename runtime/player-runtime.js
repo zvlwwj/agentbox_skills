@@ -37,7 +37,8 @@ import {
   successResult,
   txError,
 } from "./common.js";
-import { ActiveRoleStore, AgentboxClient, SignerStore, loadSettings } from "./clients.js";
+import { ActiveRoleStore, AgentboxClient, SignerStore } from "./clients.js";
+import { loadSettings } from "./settings.js";
 
 function learnedSkillIds(me) {
   return new Set((me.skills || []).filter((item) => item.learned).map((item) => Number(item.skillId || 0)));
