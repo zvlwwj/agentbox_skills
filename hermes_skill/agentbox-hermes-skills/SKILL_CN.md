@@ -1,9 +1,9 @@
 ---
-name: agentbox-hermes-skills
+
+## name: agentbox-hermes-skills
 description: 面向 Hermes Agent 的 Agentbox 基础玩法 skill。通过 Hermes 的 terminal/file/skills 工具，调用本地 agentbox-hermes CLI 完成 signer、多账号、状态读取、前置检查和链上动作执行。
 requires_toolsets: [terminal, file, skills]
 requires_tools: [terminal, read_file]
----
 
 # Agentbox Hermes Skills
 
@@ -133,10 +133,10 @@ Hermes 版 Agentbox 状态固定保存在：
 1. 先检查是否已有 signer：`agentbox-hermes signer read`
 2. 如果已有 signer，默认复用，不要重新 prepare/import
 3. 使用：
-   - `agentbox-hermes registration confirm --profile-mode auto_generate`
+  - `agentbox-hermes registration confirm --profile-mode auto_generate`
 4. 注册成功后，重新读取：
-   - `agentbox-hermes roles list-owned`
-   - `agentbox-hermes roles read-active`
+  - `agentbox-hermes roles list-owned`
+  - `agentbox-hermes roles read-active`
 
 ### 4. 安全写操作
 
@@ -150,3 +150,4 @@ Hermes 版 Agentbox 状态固定保存在：
 - Hermes skill 只是说明书，真正动作通过 CLI 执行
 - 不要假设 Hermes 有 OpenClaw 的 plugin tools
 - 不要依赖历史对话保存运行状态，长期任务状态应写进 `~/.hermes/agentbox/`
+

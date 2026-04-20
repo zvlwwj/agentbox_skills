@@ -1,62 +1,59 @@
 ---
 name: agentbox-cron-orchestrator
-description: Use this skill when the user wants OpenClaw to create, update, or maintain a stable background cron job for Agentbox.
+description: A dedicated skill for creating, updating, and maintaining stable background cron jobs for Agentbox in OpenClaw. Use it when the user wants the agent to create a long-running background task by itself.
 ---
 
 # Agentbox Cron Orchestrator
 
 ## Skill Description
 
-This skill does not add new onchain gameplay tools. Instead, it guides the OpenClaw agent to:
+This skill does not directly provide new onchain gameplay tools. Instead, it guides the OpenClaw agent to:
 
 - create a long-running background cron job for Agentbox
-- update an existing cron job instead of creating duplicates
-- use fixed-interval scheduling plus prompt-level `next_cron_job_time` skipping for stable operation
+- update an existing cron job instead of creating multiple similar jobs
+- use fixed-interval scheduling plus a prompt-level `next_cron_job_time` skip mechanism to keep background execution stable
+- create or update a dedicated "daily game report" cron job for Agentbox, so the user can receive regular reports
 
-Use this skill when the user asks for:
+It is suitable for scenarios such as:
 
-- a background Agentbox runner
-- a stable long-running cron job
-- updating an existing Agentbox cron job prompt or schedule
+- the user asks to "run the game in the background"
+- the user asks to "create a stable Agentbox cron job"
+- the user asks to "update the prompt / session / scheduling parameters of an existing cron job"
 
-## Important Constraints
+## Important Conventions
 
-### 1. Do not rely on an isolated cron job to edit its own schedule
+- When the user asks to "run the game in the background", the default behavior should be to create or update two jobs together:
+  - `agentbox-background-runner`: responsible for continuously advancing gameplay
+  - `agentbox-daily-report`: responsible for generating a daily game report
 
-An isolated cron agent usually does not have owner-only `cron.update` access.
+## cron job delivery
 
-Therefore:
-
-- do not make self-editing schedule changes a hard dependency
-- do not rely on the cron job to move its own next execution time
-
-Use this pattern instead:
-
-- create a fixed `every` cron job
-- let the prompt decide whether to skip the current run based on `next_cron_job_time`
-
-### 2. Prefer a named session
-
-Use a named session such as:
-
-- `session:agentbox-background-runner`
-
-This helps preserve continuity and makes prompt/session debugging easier.
-
-### 3. Delivery should usually be silent
-
-For background Agentbox jobs, prefer:
+For background Agentbox gameplay cron jobs, the recommended setting is:
 
 - `delivery.mode = "none"`
 
-This avoids runs being marked as failed due to missing outbound channels.
+Reason:
 
-## Default Cron Strategy
+- it avoids runs being incorrectly marked as errors when no `channel` is available
+- background agents usually do not need to proactively announce themselves to a chat channel
 
-When the user asks to create a background cron job, use these defaults:
+For "daily report" jobs, silent mode should not be the default.
 
-- schedule kind: `every`
-- interval: `600000ms` (every 10 minutes)
+If the user does not explicitly say "do not send", the agent should choose an available delivery target by default, in this order:
+
+- the user's currently visible main session
+- a session explicitly specified by the user
+- a delivery channel explicitly requested by the user
+
+Only when the user explicitly says "do not deliver" or "generate only without sending" may the report fall back to:
+
+- generating into a session / record file
+- and clearly telling the user that the daily report is not being proactively delivered
+
+## Default Strategy For Gameplay Cron Jobs
+
+- schedule type: `every`
+- recommended interval: `600000ms` (every 10 minutes)
 - `enabled: true`
 - `deleteAfterRun: false`
 - `sessionTarget: "session:agentbox-background-runner"`
@@ -64,79 +61,147 @@ When the user asks to create a background cron job, use these defaults:
 - `delivery.mode: "none"`
 - `lightContext: true`
 
-This means:
+Notes:
 
-- the job wakes up every 10 minutes
-- whether it actually performs onchain actions is controlled by the prompt's `next_cron_job_time`
+- it wakes up on a fixed 10-minute interval
+- whether it should actually perform onchain actions is decided by `next_cron_job_time` inside the prompt
+- if the current time has not yet reached `next_cron_job_time`, the run should only read and record state, and should not perform any new onchain write
+- the agent should also create or update the daily report job together with it
 
-## Prompt Source
+### Default Strategy For Daily Report Cron Jobs
 
-Use this prompt template by default:
+- schedule type: `every`
+- recommended interval: `86400000ms` (every 24 hours)
+- `enabled: true`
+- `deleteAfterRun: false`
+- recommended `sessionTarget`:
+  - if the user does not explicitly request "do not send", bind it to the user's current main session or a session explicitly specified by the user
+  - only if the user explicitly wants "generate only without sending", bind it to a named session such as `session:agentbox-daily-report`
+- `payload.kind: "agentTurn"`
+- `lightContext: true`
 
-- `agentbox_skills/docs/OPENCLAW_CRON_PROMPT_CN.md`
+Notes:
 
-Before creating the job, fill in the needed runtime context such as:
+- the daily report job should stay separate from the gameplay runner
+- the daily report job is mainly responsible for summarizing the last 24 hours of progress, outputs, and exceptions, rather than driving new onchain actions
+- if the user does not explicitly request "do not send", the daily report job should default to a delivery target visible to the user
 
-- `roleWallet`
+## Prompt Sources
+
+When creating an Agentbox background gameplay cron job, the preferred prompt template is:
+
+- `agentbox_skills/docs/OPENCLAW_CRON_PROMPT.md`
+
+When creating an Agentbox daily report cron job, the preferred prompt template is:
+
+- `agentbox_skills/docs/OPENCLAW_DAILY_REPORT_PROMPT.md`
+
+Before use, replace the relevant runtime context variables such as:
+
+- role `roleWallet`
 - `owner`
 - current time placeholders
 
-If the user asks for a custom strategy, modify this template conservatively rather than replacing its structure.
+If the user explicitly wants a custom strategy, you may make local edits on top of the template, but by default do not drift away from the original structure:
 
-## Create-vs-Update Priority
+- `Operation Plan`
+- `Execution Conclusion`
+- `goal_id`
+- `planned_actions`
+- `stop_reason`
+- `next_cron_job_time`
+- `summery`
 
-### 1. Check for an existing background job first
+For daily report jobs, do not break the following output structure by default:
 
-If a clearly matching Agentbox background job already exists:
+- `Report Time Range`
+- `Role Overview`
+- `Key Progress`
+- `Resources and AGC Changes`
+- `Risks / Exceptions`
+- `Next-Step Suggestions`
 
-- update it
-- do not create a duplicate
+## Priority When Creating Or Updating
 
-### 2. Only create a new job when needed
+### 1. Check whether a job with the same purpose already exists
 
-When creating a new job, explicitly set:
+If there is already a job clearly meant for Agentbox background execution:
+
+- update the existing job first
+- do not create duplicate jobs without a reason
+
+If the user asks for "background operation", check separately:
+
+- whether a gameplay runner job already exists
+- whether a daily report job already exists
+
+By default, both should exist. If either one is missing, create the missing one.
+
+### 2. Create a new job only when necessary
+
+When creating a new job, explicitly define:
 
 - job name
 - session target
-- schedule kind and interval
+- schedule type and interval
 - payload message
 - delivery mode
 
-### 3. If the user only wants to change the prompt
+### 3. If the user only wants to modify the prompt
 
-Prefer updating:
+Do not delete and recreate the job. Prefer updating:
 
 - `payload.message`
-- and only the schedule fields that actually need to change
+- any schedule fields that actually need to change
 
-## Recommended Naming
+### 4. If the user asks to add a daily report job
 
-Use these defaults unless the user says otherwise:
+First determine whether an existing job already serves the "daily summary" purpose:
+
+- if a dedicated daily report job already exists, update it first
+- if only a gameplay runner exists, do not automatically mix the reporting logic directly into it
+- it is better to create a separate daily report job with a clear responsibility boundary
+
+## Recommended Job Conventions
+
+The default recommended naming is:
 
 - job name: `agentbox-background-runner`
 - session target: `session:agentbox-background-runner`
 
-Keeping them aligned makes maintenance easier.
+For the daily report job, the default recommended naming is:
 
-## Rules While Using This Skill
+- job name: `agentbox-daily-report`
+- session target: `session:agentbox-daily-report`
 
-- explain outcomes to the user in semantic, plain language
-- avoid creating duplicate background jobs
-- prefer `every` instead of single-shot `at`
-- prefer silent delivery unless the user explicitly wants announcements
-- if the user simply wants stable background operation, default to a 10-minute interval
+This keeps job names and session names aligned, which makes debugging easier.
 
-## What To Tell The User After Success
+## Rules The Agent Should Follow When Using This Skill
 
-After creating or updating the cron job, clearly report:
+- when explaining things to the user, prefer semantic descriptions instead of dumping OpenClaw internal field names
+- unless the user explicitly asks for it, do not create multiple duplicate background jobs
+- gameplay background jobs should be silent by default; daily report jobs should be delivered to the user by default, unless the user explicitly asks not to deliver them
+- if the user only says "run it stably in the background", use a fixed 10-minute `every` schedule by default
+- if the user only says "run it stably in the background", also create both the gameplay runner job and the daily report job by default
+- if the user asks for a higher or lower frequency, explicitly adjust `everyMs`
+- if the user asks for "generate a daily report every day", use a fixed 24-hour `every` schedule by default
+- if the daily report does not explicitly say "do not send", prefer delivering it to a user-visible session or another available channel
+
+## How To Report Success Back To The User
+
+After creating or updating cron jobs, clearly tell the user:
 
 - whether it was created or updated
 - the job name
 - the schedule type and interval
-- the session target
+- the session name
 - whether it runs silently
 - which prompt template it uses
 
-Suggested phrasing:
+Example feedback for the daily report job:
 
-> Created the background cron job `agentbox-background-runner` with a fixed 10-minute schedule, bound to `session:agentbox-background-runner`, running silently. Whether a run performs onchain actions is controlled by `next_cron_job_time` inside the prompt.
+> Created the daily game report cron job `agentbox-daily-report`. It uses a fixed schedule of once every 24 hours, is bound to `session:agentbox-daily-report`, and uses `agentbox_skills/docs/OPENCLAW_DAILY_REPORT_PROMPT.md` as the report template. From now on it will summarize the last day's gameplay progress on that schedule.
+
+Recommended feedback example when the user asks for "long-running background gameplay":
+
+> Created two background jobs: `agentbox-background-runner` uses a fixed schedule of once every 10 minutes to keep the game progressing continuously, and `agentbox-daily-report` uses a fixed schedule of once every 24 hours to summarize the last day's gameplay report. They run separately so gameplay progression and report generation are not coupled into the same cron job.

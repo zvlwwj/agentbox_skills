@@ -1,6 +1,6 @@
 ---
 name: agentbox-hermes-cron-orchestrator
-description: Dedicated skill for creating, updating, and maintaining Agentbox background cron jobs in Hermes. Use when the user wants Hermes itself to keep Agentbox running in the background.
+description: Dedicated skill for creating, updating, and maintaining Agentbox background cron jobs in Hermes. Use it when the user wants Hermes itself to keep Agentbox running in the background.
 requires_toolsets: [terminal, file, skills, cronjob]
 requires_tools: [terminal, read_file, cronjob]
 ---
@@ -13,9 +13,16 @@ This skill is responsible for:
 
 - creating Hermes-native Agentbox background cron jobs
 - updating existing background jobs instead of creating duplicates
+- creating or updating a dedicated daily report cron job for Agentbox
 - persisting runtime state in `~/.hermes/agentbox/background_runner_state.json`
 
-## Core principles
+## Important Conventions
+
+- When the user asks to "run the game in the background", the default behavior should be to create or update two jobs together:
+  - `agentbox-background-runner`: continuously advances gameplay
+  - `agentbox-daily-report`: generates a daily game report
+
+## Core Principles
 
 ### 1. Hermes fully owns background execution
 
@@ -45,9 +52,9 @@ Therefore:
 
 - do not depend on chat history
 - read `~/.hermes/agentbox/background_runner_state.json` at the start of each run
-- write the new execution summary and `next_check_time` back at the end
+- write the new execution conclusion and `next_check_time` back at the end
 
-## Default job conventions
+## Default Gameplay Runner Job Conventions
 
 Recommended defaults:
 
@@ -57,9 +64,33 @@ Recommended defaults:
   - `agentbox-hermes-skills`
   - `agentbox-hermes-cron-orchestrator`
 - prompt template:
-  - `agentbox_skills/docs/HERMES_CRON_PROMPT_CN.md`
+  - `agentbox_skills/docs/HERMES_CRON_PROMPT.md`
 
-## Create/update priority
+Notes:
+
+- it wakes up on a fixed 10-minute interval
+- whether it should actually perform on-chain actions is decided by `next_check_time` inside the prompt
+- if the current time has not yet reached `next_check_time`, the run should only read and record state, and should not perform any new on-chain write
+- the agent should also create or update the daily report job together with it
+
+## Default Daily Report Job Conventions
+
+Recommended defaults:
+
+- job name: `agentbox-daily-report`
+- schedule: `every 24h`
+- attached skills:
+  - `agentbox-hermes-skills`
+  - `agentbox-hermes-cron-orchestrator`
+- prompt template:
+  - `agentbox_skills/docs/HERMES_DAILY_REPORT_PROMPT.md`
+
+Notes:
+
+- the daily report job should stay separate from the gameplay runner
+- the daily report job is mainly responsible for summarizing the last 24 hours of progress, outputs, and exceptions, rather than driving new on-chain actions
+
+## Create/Update Priority
 
 ### 1. List existing jobs first
 
@@ -67,7 +98,12 @@ Use:
 
 - `cronjob(action="list")`
 
-Check whether there is already a clearly named Agentbox background job.
+If the user asks for background operation, check separately:
+
+- whether a gameplay runner job already exists
+- whether a daily report job already exists
+
+By default, both should exist. Create whichever one is missing.
 
 ### 2. Update first if one already exists
 
@@ -89,15 +125,34 @@ When creating, explicitly define:
 - attached skills
 - prompt body
 
-## Prompt requirements
+### 4. If the user only wants to modify the prompt
 
-Prefer:
+Do not delete and recreate the job. Prefer updating:
 
-- `agentbox_skills/docs/HERMES_CRON_PROMPT_CN.md`
+- `prompt`
+- any schedule fields that actually need to change
 
-Do not copy the OpenClaw cron prompt unchanged.
+### 5. If the user asks to add a daily report job
 
-## State file requirements
+First determine whether a dedicated daily report job already exists:
+
+- if a dedicated daily report job already exists, update it first
+- if only a gameplay runner exists, do not automatically mix reporting logic into it
+- it is better to create a separate daily report job with a clearer responsibility boundary
+
+## Prompt Requirements
+
+When creating a Hermes gameplay runner job, prefer:
+
+- `agentbox_skills/docs/HERMES_CRON_PROMPT.md`
+
+When creating a Hermes daily report job, prefer:
+
+- `agentbox_skills/docs/HERMES_DAILY_REPORT_PROMPT.md`
+
+Do not copy the OpenClaw prompts unchanged.
+
+## State File Requirements
 
 Background jobs must use these fixed files:
 
@@ -112,7 +167,15 @@ The stored state should at least include:
 - `next_check_time`
 - `active_role`
 
-## Success feedback
+## Rules While Using This Skill
+
+- explain outcomes to the user in semantic, plain language
+- unless the user explicitly asks for it, do not create multiple duplicate background jobs
+- if the user simply wants stable background operation, create both the gameplay runner job and the daily report job by default
+- if the user simply wants stable background operation, default to `every 10m`
+- if the user asks for "generate a daily report every day", default to `every 24h`
+
+## Success Feedback
 
 When the cron job is created or updated, tell the user:
 
@@ -123,6 +186,10 @@ When the cron job is created or updated, tell the user:
 - which prompt template was used
 - where the runtime state is persisted
 
-Recommended example:
+Example feedback for the daily report job:
 
-> Created Hermes background job `agentbox-background-runner` with a fixed `every 10m` schedule, attached `agentbox-hermes-skills` and `agentbox-hermes-cron-orchestrator`, and configured the Hermes-specific background prompt. Runtime state will be written to `~/.hermes/agentbox/background_runner_state.json`.
+> Created Hermes daily report job `agentbox-daily-report` with a fixed `every 24h` schedule, attached `agentbox-hermes-skills` and `agentbox-hermes-cron-orchestrator`, and configured `agentbox_skills/docs/HERMES_DAILY_REPORT_PROMPT.md` as the report template.
+
+Recommended feedback example when the user asks for long-running background gameplay:
+
+> Created two Hermes background jobs: `agentbox-background-runner` runs on a fixed `every 10m` schedule to keep gameplay progressing, and `agentbox-daily-report` runs on a fixed `every 24h` schedule to summarize the last day's gameplay report. They are kept separate so gameplay progression and report generation are not coupled into the same cron job.
