@@ -39,16 +39,35 @@ Reason:
 
 For "daily report" jobs, silent mode should not be the default.
 
-If the user does not explicitly say "do not send", the agent should choose an available delivery target by default, in this order:
+If the user does not explicitly say "do not send", the agent should first automatically check whether a usable delivery channel currently exists. The check order should be fixed:
 
-- the user's currently visible main session
-- a session explicitly specified by the user
-- a delivery channel explicitly requested by the user
+- first check `openclaw channels status`
+- then check `openclaw channels list`
+- if it is still unclear, inspect the local config for enabled channel settings
 
-Only when the user explicitly says "do not deliver" or "generate only without sending" may the report fall back to:
+If a usable delivery channel exists, the agent must explicitly set both:
 
-- generating into a session / record file
-- and clearly telling the user that the daily report is not being proactively delivered
+- `delivery.mode = "announce"`
+- `delivery.channel = "<verified_channel>"`
+- for daily report jobs, also default to `delivery.bestEffort = true` so an external delivery failure does not mark the whole report job as failed
+
+If that channel also requires an explicit destination, recipient, or target address, the agent should automatically discover and explicitly set the corresponding delivery target, for example:
+
+- `delivery.to = "<resolved_target>"`
+
+The target-discovery rule should be fixed:
+
+- prefer a delivery route that OpenClaw has already verified, recently used successfully, or can infer directly from local state
+- prefer existing local channel / pairing / log / config data instead of asking the user to provide the target again
+- if the current channel is missing a required target and local state cannot resolve it, try another usable delivery channel with a known target
+- only fall back to `delivery.mode = "none"` after all candidate delivery channels fail to yield a valid target
+
+Do not omit the target just because a channel is enabled; for channels that require a concrete destination, proactive cron delivery still fails without it.
+
+If no usable channel exists, automatically fall back to:
+
+- `delivery.mode = "none"`
+- generating into the dedicated session / record file
 
 ## Default Strategy For Gameplay Cron Jobs
 
@@ -75,8 +94,12 @@ Notes:
 - `enabled: true`
 - `deleteAfterRun: false`
 - recommended `sessionTarget`:
-  - if the user does not explicitly request "do not send", bind it to the user's current main session or a session explicitly specified by the user
-  - only if the user explicitly wants "generate only without sending", bind it to a named session such as `session:agentbox-daily-report`
+  - you may keep using a named session such as `session:agentbox-daily-report`
+  - but if proactive delivery is enabled, you must explicitly set:
+    - `delivery.mode = "announce"`
+    - `delivery.channel = "<verified_channel>"`
+    - `delivery.bestEffort = true`
+    - if that channel requires an explicit target, also set `delivery.to` or the equivalent target field
 - `payload.kind: "agentTurn"`
 - `lightContext: true`
 
@@ -84,7 +107,7 @@ Notes:
 
 - the daily report job should stay separate from the gameplay runner
 - the daily report job is mainly responsible for summarizing the last 24 hours of progress, outputs, and exceptions, rather than driving new onchain actions
-- if the user does not explicitly request "do not send", the daily report job should default to a delivery target visible to the user
+- if the user does not explicitly request "do not send", the daily report job should first check for an available channel in the fixed order above; if one exists, explicitly set `delivery.mode = "announce"`, `delivery.channel`, and `delivery.bestEffort = true`, then automatically fill in any target information that channel requires; if the current channel lacks a resolvable target, try another usable delivery channel; only switch to `delivery.mode = "none"` when none of them can produce a valid delivery route
 
 ## Prompt Sources
 
@@ -192,7 +215,7 @@ This keeps job names and session names aligned, which makes debugging easier.
 - if the user only says "run it stably in the background", also create both the gameplay runner job and the daily report job by default
 - if the user asks for a higher or lower frequency, explicitly adjust `everyMs`
 - if the user asks for "generate a daily report every day", use a fixed 24-hour `every` schedule by default
-- if the daily report does not explicitly say "do not send", prefer delivering it to a user-visible session or another available channel
+- if the daily report does not explicitly say "do not send", first check whether a usable channel exists in the fixed order above; if yes, explicitly set `delivery.mode = "announce"` and `delivery.channel`, otherwise automatically switch to `delivery.mode = "none"`
 
 ## How To Report Success Back To The User
 
