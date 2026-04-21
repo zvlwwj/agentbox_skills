@@ -100,6 +100,24 @@ function extractErrorSummary(contract, error) {
   };
 }
 
+function errorMessageIncludes(error, pattern) {
+  const haystacks = [
+    error?.shortMessage,
+    error?.reason,
+    error?.message,
+    error?.info?.error?.message,
+    error?.error?.message,
+    error?.data?.message,
+  ]
+    .filter(Boolean)
+    .map((value) => String(value).toLowerCase());
+  return haystacks.some((value) => value.includes(pattern));
+}
+
+function isIntrinsicGasTooHighError(error) {
+  return errorMessageIncludes(error, "intrinsic gas too high");
+}
+
 export class SignerStore {
   constructor(settings) {
     this.settings = settings;
@@ -395,17 +413,43 @@ export class AgentboxClient {
     txRequest.chainId = this.settings.chainId;
     txRequest.nonce = await this.provider.getTransactionCount(wallet.address);
     let gasEstimate;
+    let usedFallbackGasLimit = false;
     try {
       gasEstimate = await this.provider.estimateGas({ ...txRequest, from: wallet.address });
     } catch (error) {
       const diagnostic = extractErrorSummary(contract, error);
-      throw txError("ESTIMATE_REVERT", diagnostic.message || "Transaction simulation failed during gas estimation", {
-        method,
-        args: normalizeDiagnosticValue(args),
-        ...diagnostic.data,
-      });
+      if (!isIntrinsicGasTooHighError(error)) {
+        throw txError("ESTIMATE_REVERT", diagnostic.message || "Transaction simulation failed during gas estimation", {
+          method,
+          args: normalizeDiagnosticValue(args),
+          ...diagnostic.data,
+        });
+      }
+
+      const callableRequest = { ...txRequest, from: wallet.address };
+      try {
+        await this.provider.call(callableRequest);
+      } catch (callError) {
+        const callDiagnostic = extractErrorSummary(contract, callError);
+        throw txError("ESTIMATE_REVERT", callDiagnostic.message || diagnostic.message || "Transaction simulation failed during gas estimation", {
+          method,
+          args: normalizeDiagnosticValue(args),
+          estimateError: diagnostic.data?.rawMessage ?? diagnostic.message,
+          latestCallMessage: callDiagnostic.message,
+          ...diagnostic.data,
+          ...callDiagnostic.data,
+        });
+      }
+
+      const retryGasLimit = BigInt(this.settings.estimateGasRetryLimit ?? "200000");
+      try {
+        gasEstimate = await this.provider.estimateGas({ ...callableRequest, gasLimit: retryGasLimit });
+      } catch {
+        gasEstimate = retryGasLimit;
+        usedFallbackGasLimit = true;
+      }
     }
-    txRequest.gasLimit = gasEstimate * 12n / 10n;
+    txRequest.gasLimit = usedFallbackGasLimit ? gasEstimate : (gasEstimate * 12n / 10n);
     const feeData = await this.provider.getFeeData();
     if (feeData.maxFeePerGas != null || feeData.maxPriorityFeePerGas != null) {
       txRequest.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas ?? ethers.parseUnits("1", "gwei");

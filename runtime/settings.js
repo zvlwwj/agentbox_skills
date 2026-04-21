@@ -30,6 +30,7 @@ export function loadSettings(pluginRoot, overrides = {}) {
     indexerTimeoutMs: 10000,
     receiptConfirmations: 1,
     txTimeoutSeconds: 120,
+    estimateGasRetryLimit: "200000",
     minNativeBalanceEth: "0.012",
     registrationValueEth: "0.01",
     autoMinOwnerBalanceEth: "0.0005",
