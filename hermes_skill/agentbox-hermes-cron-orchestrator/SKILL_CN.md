@@ -1,6 +1,6 @@
 ---
 name: agentbox-hermes-cron-orchestrator
-description: 用于在 Hermes 中创建、更新和维护 Agentbox 后台 cron job 的专用 skill。适合用户要求“让 Hermes 自己在后台稳定运行 Agentbox”时使用。
+description: 用于在 Hermes 中创建、更新和维护 Agentbox 后台 cron job 的专用 skill。适合长期后台运行、更新已有后台任务、创建或调整游戏日报任务，以及更改当前游戏目标等场景。
 requires_toolsets: [terminal, file, skills, cronjob]
 requires_tools: [terminal, read_file, cronjob]
 ---
@@ -15,6 +15,7 @@ requires_tools: [terminal, read_file, cronjob]
 - 更新已有后台 job，而不是重复创建多个
 - 为 Agentbox 创建或更新“游戏日报” cron job
 - 把后台状态写入 `~/.hermes/agentbox/background_runner_state.json`
+- 在用户要求更改游戏目标时，更新现有后台 job 的目标与状态继承逻辑
 
 ## 重要约定
 
@@ -177,6 +178,14 @@ Hermes cron 每次都是全新 session。
 - `prompt`
 - 必要的调度参数
 
+如果用户要求更改当前游戏目标，也应优先走这一类更新路径，而不是新建重复任务。
+
+此时应至少检查并按需更新：
+
+- 后台运行 job 的 `prompt`
+- `~/.hermes/agentbox/background_runner_state.json` 中与目标相关的字段，例如 `goal_id`、`operation_goal`、`stop_reason`、`next_check_time`
+- 如果日报需要反映新的目标口径，也应同步更新日报 job 的 prompt 描述
+
 ### 5. 如果用户要求新增日报任务
 
 优先判断是否已存在单独的日报 job：
@@ -225,6 +234,7 @@ Hermes cron 每次都是全新 session。
 - 除非用户要求，不要创建多个重复后台任务
 - 如果用户只说“后台稳定运行”，默认同时创建后台运行任务和日报任务
 - 如果用户只说“后台稳定运行”，默认采用 `every 10m`
+- 如果用户要求“更改游戏目标”，也需要参考这个 skill，优先更新现有后台 job 的 prompt 与状态文件，而不是只在当前对话里临时说明
 - 如果用户要求“每天生成日报”，默认采用 `every 24h`
 - 后台运行任务默认 `deliver = local`
 - 日报任务如果没有明确要求“不发送”，应优先寻找可投递链路并显式设置 `deliver`
@@ -241,11 +251,3 @@ Hermes cron 每次都是全新 session。
 - 附加了哪些 skill
 - 使用的是哪份 prompt 模板
 - 状态文件写到哪里
-
-日报任务反馈示例：
-
-> 已在 Hermes 中创建日报任务 `agentbox-daily-report`，采用每 24 小时一次的固定调度，附加 `agentbox-hermes-skills` 与 `agentbox-hermes-cron-orchestrator` 两个 skill，并使用 `agentbox_skills/docs/HERMES_DAILY_REPORT_PROMPT_CN.md` 作为日报模板。
-
-用户要求“后台长期运行”时的推荐反馈示例：
-
-> 已在 Hermes 中创建两项后台任务：`agentbox-background-runner` 负责每 10 分钟一次的固定调度，用于持续推进游戏；`agentbox-daily-report` 负责每 24 小时一次的固定调度，用于汇总最近一天的游戏日报。两者会分别运行，避免把游戏推进和日报生成耦合在同一个 cron job 中。

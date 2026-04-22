@@ -1,6 +1,6 @@
 ---
 name: agentbox-hermes-cron-orchestrator
-description: Dedicated skill for creating, updating, and maintaining Agentbox background cron jobs in Hermes. Use it when the user wants Hermes itself to keep Agentbox running in the background.
+description: Dedicated skill for creating, updating, and maintaining Agentbox background cron jobs in Hermes. It is suitable for long-running background operation, updating existing background tasks, creating or adjusting daily report tasks, and changing the current gameplay goal.
 requires_toolsets: [terminal, file, skills, cronjob]
 requires_tools: [terminal, read_file, cronjob]
 ---
@@ -15,6 +15,7 @@ This skill is responsible for:
 - updating existing background jobs instead of creating duplicates
 - creating or updating a dedicated daily report cron job for Agentbox
 - persisting runtime state in `~/.hermes/agentbox/background_runner_state.json`
+- updating the goal and state-inheritance flow of existing background jobs when the user changes the gameplay goal
 
 ## Important Conventions
 
@@ -180,6 +181,14 @@ Do not delete and recreate the job. Prefer updating:
 - `prompt`
 - any schedule fields that actually need to change
 
+If the user wants to change the current gameplay goal, this should also go through this update path instead of creating a duplicate job.
+
+At minimum, check and update these parts as needed:
+
+- the gameplay runner job's `prompt`
+- goal-related fields in `~/.hermes/agentbox/background_runner_state.json`, such as `goal_id`, `operation_goal`, `stop_reason`, and `next_check_time`
+- if the daily report should reflect the new goal framing, also update the daily report job's prompt wording
+
 ### 5. If the user asks to add a daily report job
 
 First determine whether a dedicated daily report job already exists:
@@ -228,6 +237,7 @@ The stored state should at least include:
 - unless the user explicitly asks for it, do not create multiple duplicate background jobs
 - if the user simply wants stable background operation, create both the gameplay runner job and the daily report job by default
 - if the user simply wants stable background operation, default to `every 10m`
+- if the user asks to "change the gameplay goal", this skill should also be consulted; prefer updating the existing background job prompt and state files instead of only describing the change in the current chat
 - if the user asks for "generate a daily report every day", default to `every 24h`
 - background runner jobs should default to `deliver = local`
 - if the user does not explicitly say "do not send", daily report jobs should prefer finding a usable delivery route and explicitly setting `deliver`
@@ -244,11 +254,3 @@ When the cron job is created or updated, tell the user:
 - which skills were attached
 - which prompt template was used
 - where the runtime state is persisted
-
-Example feedback for the daily report job:
-
-> Created Hermes daily report job `agentbox-daily-report` with a fixed `every 24h` schedule, attached `agentbox-hermes-skills` and `agentbox-hermes-cron-orchestrator`, and configured `agentbox_skills/docs/HERMES_DAILY_REPORT_PROMPT.md` as the report template.
-
-Recommended feedback example when the user asks for long-running background gameplay:
-
-> Created two Hermes background jobs: `agentbox-background-runner` runs on a fixed `every 10m` schedule to keep gameplay progressing, and `agentbox-daily-report` runs on a fixed `every 24h` schedule to summarize the last day's gameplay report. They are kept separate so gameplay progression and report generation are not coupled into the same cron job.

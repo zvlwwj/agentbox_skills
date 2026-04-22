@@ -1,7 +1,7 @@
 ---
 
 ## name: agentbox-cron-orchestrator
-description: A dedicated skill for creating, updating, and maintaining stable background cron jobs for Agentbox in OpenClaw. Use it when the user wants the agent to create a long-running background task by itself.
+description: A dedicated skill for creating, updating, and maintaining stable Agentbox background cron jobs in OpenClaw. It is suitable for long-running background operation, updating existing background tasks, creating or adjusting daily report tasks, and changing the current gameplay goal.
 
 # Agentbox Cron Orchestrator
 
@@ -19,6 +19,7 @@ It is suitable for scenarios such as:
 - the user asks to "run the game in the background"
 - the user asks to "create a stable Agentbox cron job"
 - the user asks to "update the prompt / session / scheduling parameters of an existing cron job"
+- the user asks to "change the current gameplay goal / main objective / background strategy"
 
 ## Important Conventions
 
@@ -184,6 +185,14 @@ Do not delete and recreate the job. Prefer updating:
 - `payload.message`
 - any schedule fields that actually need to change
 
+If the user wants to change the current gameplay goal, this should also be handled through this update path instead of creating a duplicate job.
+
+At minimum, check and update these parts as needed:
+
+- the gameplay runner job's `payload.message`
+- goal-related records in the current round / state files, such as `goal_id`, `goal_content`, and `operation_goal`
+- if the daily report should reflect the new goal framing, also update the daily report job's prompt wording
+
 ### 4. If the user asks to add a daily report job
 
 First determine whether an existing job already serves the "daily summary" purpose:
@@ -213,6 +222,7 @@ This keeps job names and session names aligned, which makes debugging easier.
 - gameplay background jobs should be silent by default; daily report jobs should be delivered to the user by default, unless the user explicitly asks not to deliver them
 - if the user only says "run it stably in the background", use a fixed 10-minute `every` schedule by default
 - if the user only says "run it stably in the background", also create both the gameplay runner job and the daily report job by default
+- if the user asks to "change the gameplay goal", this skill should also be consulted; prefer updating the existing background job's goal-related prompt / state instead of only describing the change in the current chat
 - if the user asks for a higher or lower frequency, explicitly adjust `everyMs`
 - if the user asks for "generate a daily report every day", use a fixed 24-hour `every` schedule by default
 - if the daily report does not explicitly say "do not send", first check whether a usable channel exists in the fixed order above; if yes, explicitly set `delivery.mode = "announce"` and `delivery.channel`, otherwise automatically switch to `delivery.mode = "none"`
@@ -227,11 +237,3 @@ After creating or updating cron jobs, clearly tell the user:
 - the session name
 - whether it runs silently
 - which prompt template it uses
-
-Example feedback for the daily report job:
-
-> Created the daily game report cron job `agentbox-daily-report`. It uses a fixed schedule of once every 24 hours, is bound to `session:agentbox-daily-report`, and uses `agentbox_skills/docs/OPENCLAW_DAILY_REPORT_PROMPT.md` as the report template. From now on it will summarize the last day's gameplay progress on that schedule.
-
-Recommended feedback example when the user asks for "long-running background gameplay":
-
-> Created two background jobs: `agentbox-background-runner` uses a fixed schedule of once every 10 minutes to keep the game progressing continuously, and `agentbox-daily-report` uses a fixed schedule of once every 24 hours to summarize the last day's gameplay report. They run separately so gameplay progression and report generation are not coupled into the same cron job.
