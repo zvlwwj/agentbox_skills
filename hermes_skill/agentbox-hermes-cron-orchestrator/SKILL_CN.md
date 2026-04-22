@@ -99,7 +99,7 @@ Hermes cron 每次都是全新 session。
 推荐默认值：
 
 - job 名称：`agentbox-background-runner`
-- schedule：`every 10m`
+- schedule：`every 30m`
 - deliver：`local`
 - attached skills：
   - `agentbox-hermes-skills`
@@ -109,7 +109,7 @@ Hermes cron 每次都是全新 session。
 
 说明：
 
-- 固定每 10 分钟触发一次
+- 固定每 30 分钟触发一次
 - 是否真的执行链上动作，由 prompt 内的 `next_check_time` 决定
 - 如果当前时间未到 `next_check_time`，本轮只读取并记录，不执行新的链上写操作
 - 还应同时创建或更新日报任务
@@ -233,7 +233,7 @@ Hermes cron 每次都是全新 session。
 - 面向用户解释时，优先说语义，不要堆内部字段名
 - 除非用户要求，不要创建多个重复后台任务
 - 如果用户只说“后台稳定运行”，默认同时创建后台运行任务和日报任务
-- 如果用户只说“后台稳定运行”，默认采用 `every 10m`
+- 如果用户只说“后台稳定运行”，默认采用 `every 30m`
 - 如果用户要求“更改游戏目标”，也需要参考这个 skill，优先更新现有后台 job 的 prompt 与状态文件，而不是只在当前对话里临时说明
 - 如果用户要求“每天生成日报”，默认采用 `every 24h`
 - 后台运行任务默认 `deliver = local`

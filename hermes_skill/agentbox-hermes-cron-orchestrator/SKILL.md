@@ -102,7 +102,7 @@ Therefore:
 Recommended defaults:
 
 - job name: `agentbox-background-runner`
-- schedule: `every 10m`
+- schedule: `every 30m`
 - deliver: `local`
 - attached skills:
   - `agentbox-hermes-skills`
@@ -112,7 +112,7 @@ Recommended defaults:
 
 Notes:
 
-- it wakes up on a fixed 10-minute interval
+- it wakes up on a fixed 30-minute interval
 - whether it should actually perform on-chain actions is decided by `next_check_time` inside the prompt
 - if the current time has not yet reached `next_check_time`, the run should only read and record state, and should not perform any new on-chain write
 - the agent should also create or update the daily report job together with it
@@ -236,7 +236,7 @@ The stored state should at least include:
 - explain outcomes to the user in semantic, plain language
 - unless the user explicitly asks for it, do not create multiple duplicate background jobs
 - if the user simply wants stable background operation, create both the gameplay runner job and the daily report job by default
-- if the user simply wants stable background operation, default to `every 10m`
+- if the user simply wants stable background operation, default to `every 30m`
 - if the user asks to "change the gameplay goal", this skill should also be consulted; prefer updating the existing background job prompt and state files instead of only describing the change in the current chat
 - if the user asks for "generate a daily report every day", default to `every 24h`
 - background runner jobs should default to `deliver = local`

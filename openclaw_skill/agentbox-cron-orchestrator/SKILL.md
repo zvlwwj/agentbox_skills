@@ -73,7 +73,7 @@ If no usable channel exists, automatically fall back to:
 ## Default Strategy For Gameplay Cron Jobs
 
 - schedule type: `every`
-- recommended interval: `600000ms` (every 10 minutes)
+- recommended interval: `1800000ms` (every 30 minutes)
 - `enabled: true`
 - `deleteAfterRun: false`
 - `sessionTarget: "session:agentbox-background-runner"`
@@ -83,7 +83,7 @@ If no usable channel exists, automatically fall back to:
 
 Notes:
 
-- it wakes up on a fixed 10-minute interval
+- it wakes up on a fixed 30-minute interval
 - whether it should actually perform onchain actions is decided by `next_cron_job_time` inside the prompt
 - if the current time has not yet reached `next_cron_job_time`, the run should only read and record state, and should not perform any new onchain write
 - the agent should also create or update the daily report job together with it
@@ -220,7 +220,7 @@ This keeps job names and session names aligned, which makes debugging easier.
 - when explaining things to the user, prefer semantic descriptions instead of dumping OpenClaw internal field names
 - unless the user explicitly asks for it, do not create multiple duplicate background jobs
 - gameplay background jobs should be silent by default; daily report jobs should be delivered to the user by default, unless the user explicitly asks not to deliver them
-- if the user only says "run it stably in the background", use a fixed 10-minute `every` schedule by default
+- if the user only says "run it stably in the background", use a fixed 30-minute `every` schedule by default
 - if the user only says "run it stably in the background", also create both the gameplay runner job and the daily report job by default
 - if the user asks to "change the gameplay goal", this skill should also be consulted; prefer updating the existing background job's goal-related prompt / state instead of only describing the change in the current chat
 - if the user asks for a higher or lower frequency, explicitly adjust `everyMs`
