@@ -10,6 +10,7 @@ export const ROLE_STATE_CRAFTING = 3;
 export const ROLE_STATE_GATHERING = 4;
 export const ROLE_STATE_TELEPORTING = 5;
 export const ROLE_STATE_PENDING_SPAWN = 6;
+export const ROLE_STATE_ATTACKING = 7;
 export const DEFAULT_ROLE_RESOURCE_TOKEN_IDS = [1, 2, 3];
 export const DEFAULT_ROLE_EQUIPMENT_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8];
 export const NEARBY_COORDINATE_DELTA = 100;
@@ -40,6 +41,7 @@ const ROLE_STATE_NAME_BY_ID = {
   [ROLE_STATE_GATHERING]: "Gathering",
   [ROLE_STATE_TELEPORTING]: "Teleporting",
   [ROLE_STATE_PENDING_SPAWN]: "PendingSpawn",
+  [ROLE_STATE_ATTACKING]: "Attacking",
 };
 
 const SLOT_NAME_BY_ID = {
@@ -64,9 +66,9 @@ const NPC_NAME_BY_ID = {
   1: "Lumberjack",
   2: "Shepherd",
   3: "Miner",
-  4: "Bow crafting teacher",
-  5: "Armor crafting teacher",
-  6: "Shoes crafting teacher",
+  4: "Blacksmith",
+  5: "Tailor",
+  6: "Shoemaker",
 };
 
 export const ADDRESS = { type: "string", description: "EVM address" };
@@ -95,6 +97,7 @@ const ROLE_STATE_BY_NAME = {
   gathering: ROLE_STATE_GATHERING,
   teleporting: ROLE_STATE_TELEPORTING,
   pendingspawn: ROLE_STATE_PENDING_SPAWN,
+  attacking: ROLE_STATE_ATTACKING,
 };
 
 export function normalizeRoleState(value) {
@@ -305,6 +308,9 @@ export function decodeRoleActionSnapshot(value) {
     "gatheringRequiredBlocks",
     "gatheringTargetLandId",
     "gatheringAmount",
+    "attackStartBlock",
+    "attackRequiredBlocks",
+    "attackTargetWallet",
   ];
   const out = {};
   for (const [index, key] of keys.entries()) out[key] = decodeField(value, index, key);

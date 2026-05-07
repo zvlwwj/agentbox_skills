@@ -62,6 +62,36 @@ Recommended flow:
 3. `roles select-active` when a default account is needed
 4. Commands without `--role` then use the active role by default
 
+### Operation management
+
+The Operation Manager keeps a local structured operation file for the current `active roleWallet`. It records:
+
+- Completed operations, including each action's execution time, transaction hash, and result
+- The current running operation, including completed and unfinished actions
+- Planned future operations, including each operation's action list
+
+Commands:
+
+- `agentbox-hermes operations read-state`
+- `agentbox-hermes operations add-plan --goal <GOAL> --actions-json '<JSON_ARRAY>'`
+- `agentbox-hermes operations start-next`
+- `agentbox-hermes operations next-action`
+- `agentbox-hermes operations update-action --operation-id <ID> --action-id <ID> --status <STATUS>`
+- `agentbox-hermes operations finish-current`
+- `agentbox-hermes operations cancel-current`
+- `agentbox-hermes operations clear-completed`
+- `agentbox-hermes operations reconcile`
+- `agentbox-hermes operations reconcile --apply`
+
+For long-running background play, prefer Operation Manager state over manually maintaining a full action history in prompts or chat history:
+
+1. Run `operations read-state`
+2. If there is no current operation but planned operations exist, run `operations start-next`
+3. Run `operations next-action` to get the next recommended action
+4. Call the matching `agentbox-hermes action ...` write command
+5. The runtime automatically records the write as completed or failed
+6. If local operation state conflicts with onchain state, trust onchain state and run `operations reconcile`
+
 ### Reads
 
 - `agentbox-hermes read role-snapshot`
@@ -86,6 +116,8 @@ Optional source override:
 - `agentbox-hermes check trigger-mint`
 - `agentbox-hermes check stabilize`
 
+Gathering rule: each resource point supports at most `10` active gatherers at the same time. `check gather` returns this limit; if the current active gatherer count cannot be read directly, `action gather` may still revert when the resource point is already full.
+
 ### Actions
 
 - `agentbox-hermes action move --x <X> --y <Y>`
@@ -93,6 +125,8 @@ Optional source override:
 - `agentbox-hermes action learn --npc-id <ID>`
 - `agentbox-hermes action gather --amount <N>`
 - `agentbox-hermes action craft --recipe-id <ID>`
+- `agentbox-hermes action attack --target-wallet <ADDRESS>`
+- `agentbox-hermes action start-attack --target-wallet <ADDRESS>`
 - `agentbox-hermes action finish`
 - `agentbox-hermes action cancel`
 - `agentbox-hermes action equip --equipment-id <ID>`
@@ -104,7 +138,7 @@ Optional source override:
 ## User-facing language
 
 - Prefer semantic names such as:
-  - `Bow crafting teacher`
+  - `Blacksmith`
   - `Armor crafting`
   - `Shoes slot`
 - Only include IDs in parentheses for debugging, config validation, or when the user explicitly asks for them
@@ -112,7 +146,7 @@ Optional source override:
 For example:
 
 - Do not say: `go to npcId=4 and learn skillId=5`
-- Say: `go to the Bow crafting teacher and learn Bow crafting`
+- Say: `go to the Blacksmith and learn Bow crafting`
 
 ## Common workflows
 
@@ -134,6 +168,7 @@ For example:
 2. If a signer exists, reuse it by default; do not prepare/import a new signer
 3. Use:
    - `agentbox-hermes registration confirm --profile-mode auto_generate`
+   - Registration fee must come from the current onchain `getRegistrationFee()` result. Current tiers are `0.01/0.02/0.03/0.04/0.05 ETH`, fixed at `0.05 ETH` from role `4000` onward.
 4. After success, re-read:
    - `agentbox-hermes roles list-owned`
    - `agentbox-hermes roles read-active`

@@ -62,6 +62,36 @@ Hermes 版 Agentbox 状态固定保存在：
 3. 需要默认操作某个账号时，执行 `roles select-active`
 4. 之后省略 `--role` 的命令就会默认作用到 active role
 
+### 操作管理
+
+Operation Manager 按当前 `active roleWallet` 维护本地结构化操作文件，记录：
+
+- 已完成操作，以及每个 action 的执行时间、交易哈希和结果
+- 当前正在执行的操作，以及其中已完成和未完成的 action
+- 未来计划操作，以及每个操作需要的 action list
+
+命令：
+
+- `agentbox-hermes operations read-state`
+- `agentbox-hermes operations add-plan --goal <GOAL> --actions-json '<JSON_ARRAY>'`
+- `agentbox-hermes operations start-next`
+- `agentbox-hermes operations next-action`
+- `agentbox-hermes operations update-action --operation-id <ID> --action-id <ID> --status <STATUS>`
+- `agentbox-hermes operations finish-current`
+- `agentbox-hermes operations cancel-current`
+- `agentbox-hermes operations clear-completed`
+- `agentbox-hermes operations reconcile`
+- `agentbox-hermes operations reconcile --apply`
+
+后台长期运行时，优先使用 Operation Manager，而不是在 prompt 或聊天历史中手工维护完整 action 记录：
+
+1. 先执行 `operations read-state`
+2. 如果没有当前操作但存在计划操作，执行 `operations start-next`
+3. 执行 `operations next-action` 获取下一步建议 action
+4. 调用对应的 `agentbox-hermes action ...` 写操作
+5. 写操作会由 runtime 自动记录为完成或失败
+6. 如果本地 operation state 与链上状态冲突，以链上状态为准，并执行 `operations reconcile`
+
 ### 读取
 
 - `agentbox-hermes read role-snapshot`
@@ -86,6 +116,8 @@ Hermes 版 Agentbox 状态固定保存在：
 - `agentbox-hermes check trigger-mint`
 - `agentbox-hermes check stabilize`
 
+采集补充规则：链上每个资源点最多允许 `10` 个角色同时采集。`check gather` 会返回该限制说明；如果当前占用人数无法直接读取，`action gather` 仍可能因为资源点已满而回退。
+
 ### 写操作
 
 - `agentbox-hermes action move --x <X> --y <Y>`
@@ -93,6 +125,8 @@ Hermes 版 Agentbox 状态固定保存在：
 - `agentbox-hermes action learn --npc-id <ID>`
 - `agentbox-hermes action gather --amount <N>`
 - `agentbox-hermes action craft --recipe-id <ID>`
+- `agentbox-hermes action attack --target-wallet <ADDRESS>`
+- `agentbox-hermes action start-attack --target-wallet <ADDRESS>`
 - `agentbox-hermes action finish`
 - `agentbox-hermes action cancel`
 - `agentbox-hermes action equip --equipment-id <ID>`
@@ -104,7 +138,7 @@ Hermes 版 Agentbox 状态固定保存在：
 ## 用户反馈规则
 
 - 优先使用语义名称，例如：
-  - “弓箭制作导师”
+  - “铁匠”
   - “护甲制作”
   - “鞋子槽”
 - 只有在排障、核对配置、或用户明确要求时，才在括号里补 ID
@@ -112,7 +146,7 @@ Hermes 版 Agentbox 状态固定保存在：
 例如：
 
 - 不说：`去 npcId=4 学 skillId=5`
-- 改说：`去弓箭制作导师学习弓箭制作`
+- 改说：`去铁匠学习弓箭制作`
 
 ## 常用工作流
 
@@ -134,6 +168,7 @@ Hermes 版 Agentbox 状态固定保存在：
 2. 如果已有 signer，默认复用，不要重新 prepare/import
 3. 使用：
   - `agentbox-hermes registration confirm --profile-mode auto_generate`
+  - 注册费用必须以链上当前 `getRegistrationFee()` 为准；当前阶梯为 `0.01/0.02/0.03/0.04/0.05 ETH`，第 `4000` 个角色后固定 `0.05 ETH`。
 4. 注册成功后，重新读取：
   - `agentbox-hermes roles list-owned`
   - `agentbox-hermes roles read-active`
@@ -150,4 +185,3 @@ Hermes 版 Agentbox 状态固定保存在：
 - Hermes skill 只是说明书，真正动作通过 CLI 执行
 - 不要假设 Hermes 有 OpenClaw 的 plugin tools
 - 不要依赖历史对话保存运行状态，长期任务状态应写进 `~/.hermes/agentbox/`
-

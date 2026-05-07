@@ -59,6 +59,10 @@
     "6": {
       "enum": "PendingSpawn",
       "meaning": "Waiting for VRF spawn result"
+    },
+    "7": {
+      "enum": "Attacking",
+      "meaning": "Attack started, waiting for finish settlement"
     }
   },
   "actionTypes": {
@@ -139,11 +143,15 @@
     },
     "4": {
       "skillId": 4,
-      "name": "Wooden sword crafting teacher"
+      "name": "Blacksmith"
     },
     "5": {
       "skillId": 5,
-      "name": "Armor crafting teacher"
+      "name": "Tailor"
+    },
+    "6": {
+      "skillId": 6,
+      "name": "Shoemaker"
     }
   },
   "resourcePoints": {

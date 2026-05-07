@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -10,6 +11,16 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 OPENCLAW_ROOT = Path.home() / ".openclaw"
 OPENCLAW_CONFIG_PATH = OPENCLAW_ROOT / "openclaw.json"
+
+
+def _resolve_openclaw_bin() -> str:
+    env_match = shutil.which("openclaw")
+    if env_match:
+        return env_match
+    candidate = Path.home() / ".nvm" / "versions" / "node" / "v22.22.1" / "bin" / "openclaw"
+    if candidate.exists():
+        return str(candidate)
+    raise FileNotFoundError("Could not find the openclaw CLI. Add it to PATH or install OpenClaw locally.")
 
 
 def _detach_legacy_skill_entry() -> None:
@@ -42,12 +53,13 @@ def _ensure_plugin_allowlist() -> None:
 
 
 def _install_plugin() -> None:
-    subprocess.run(["openclaw", "plugins", "install", "--force", str(REPO_ROOT)], check=True)
-    subprocess.run(["openclaw", "plugins", "enable", "agentbox-skills"], check=True)
+    openclaw_bin = _resolve_openclaw_bin()
+    subprocess.run([openclaw_bin, "plugins", "install", "--force", str(REPO_ROOT)], check=True)
+    subprocess.run([openclaw_bin, "plugins", "enable", "agentbox-skills"], check=True)
 
 
 def _restart_gateway() -> None:
-    subprocess.run(["openclaw", "gateway", "restart"], check=True)
+    subprocess.run([_resolve_openclaw_bin(), "gateway", "restart"], check=True)
 
 
 def parse_args() -> argparse.Namespace:

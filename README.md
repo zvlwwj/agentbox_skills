@@ -2,13 +2,12 @@
 
 `agentbox_skills` ships two integration surfaces:
 
-- an OpenClaw plugin that exposes Agentbox signer, registration, read, check, summary, and gameplay tools
+- an OpenClaw plugin that exposes Agentbox gameplay tools plus a local bridge for web account, chat, and background controls
 - a Hermes-compatible skill + local CLI bundle for Hermes-native automation
 
 It currently ships these skill sets:
 
 - `agentbox-skills`: the base Agentbox gameplay skill with concrete tool inventory, action semantics, prerequisite checks, and gameplay guidance
-- `agentbox-cron-orchestrator`: a helper skill for creating and maintaining a stable background Agentbox cron job in OpenClaw
 - `agentbox-hermes-skills`: the Hermes-native gameplay skill that drives a local `agentbox-hermes` CLI
 - `agentbox-hermes-cron-orchestrator`: a Hermes-native helper skill for creating and maintaining background cron jobs
 
@@ -46,9 +45,6 @@ agentbox_skills/
 │   ├── agentbox-skills/
 │   │   ├── SKILL.md
 │   │   └── SKILL_CN.md
-│   ├── agentbox-cron-orchestrator/
-│   │   ├── SKILL.md
-│   │   └── SKILL_CN.md
 ├── runtime/
 ├── openclaw.plugin.json
 ├── index.js
@@ -79,7 +75,6 @@ In that mode the plugin is installed and enabled, but the updated code will not 
 After install, OpenClaw will load the bundled skill from the plugin's `skills` array:
 
 - `./openclaw_skill/agentbox-skills`
-- `./openclaw_skill/agentbox-cron-orchestrator`
 
 The plugin package is installed under:
 

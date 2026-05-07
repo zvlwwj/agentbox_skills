@@ -1,23 +1,25 @@
 {
   "id": "agentbox-skills",
   "name": "Agentbox Skills",
-  "description": "OpenClaw plugin that exposes Agentbox signer, registration, read, check, summary, and gameplay tools.",
-  "version": "0.3.0",
+  "description": "OpenClaw plugin that exposes Agentbox gameplay tools and a local bridge for Agentbox web features.",
+  "version": "0.4.0",
+  "activation": {
+    "onStartup": true
+  },
   "skills": [
-    "./openclaw_skill/agentbox-skills",
-    "./openclaw_skill/agentbox-cron-orchestrator"
+    "./openclaw_skill/agentbox-skills"
   ],
   "contracts": {
     "tools": [
-      "agentbox_signer_prepare",
-      "agentbox_signer_import",
-      "agentbox_signer_export",
-      "agentbox_signer_read",
-      "agentbox_registration_confirm",
-      "agentbox_roles_list_owned",
-      "agentbox_roles_read_active",
-      "agentbox_roles_select_active",
-      "agentbox_roles_clear_active",
+      "agentbox_operations_read_state",
+      "agentbox_operations_add_plan",
+      "agentbox_operations_start_next",
+      "agentbox_operations_next_action",
+      "agentbox_operations_update_action",
+      "agentbox_operations_finish_current",
+      "agentbox_operations_cancel_current",
+      "agentbox_operations_clear_completed",
+      "agentbox_operations_reconcile",
       "agentbox_skills_read_role_snapshot",
       "agentbox_skills_read_world_static_info",
       "agentbox_skills_read_world_dynamic_info",
@@ -36,6 +38,7 @@
       "agentbox_skills_learn_player_accept",
       "agentbox_skills_craft_start",
       "agentbox_skills_combat_attack",
+      "agentbox_skills_combat_start_attack",
       "agentbox_skills_equip_put_on",
       "agentbox_skills_equip_take_off",
       "agentbox_skills_land_buy",
@@ -59,7 +62,32 @@
   },
   "configSchema": {
     "type": "object",
-    "additionalProperties": false,
-    "properties": {}
+    "additionalProperties": true,
+    "properties": {
+      "bridge": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "token": {
+            "type": "string"
+          },
+          "allowedOrigins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "defaultSessionKey": {
+            "type": "string"
+          },
+          "sseHeartbeatMs": {
+            "type": "number"
+          }
+        }
+      }
+    }
   }
 }

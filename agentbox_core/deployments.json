@@ -12,13 +12,13 @@
     "Core_Diamond": "0x3B8421cB5F7Ca9e8E8F311a7d02Ff1500b23C406",
     "Core_Diamond_Proxy": "0x3B8421cB5F7Ca9e8E8F311a7d02Ff1500b23C406",
     "Facets": {
-      "ActionFacet": "0x7af89ec5e1ec8ede49453f751f494bc5f608971d",
+      "ActionFacet": "0x10d421028A88af46Ad8e83c049c5E2cd5F767523",
       "AdminFacet": "0x341f382e642e94ea16b2e8cadfc8116b7ab80f1c",
-      "GatherCraftFacet": "0xfc7050ced664b9dc84042d10deff8ecc99c8571b",
+      "GatherCraftFacet": "0x5aBf77a5671c2637C2A5bED42669a9De9dcA0E9b",
       "LearnFacet": "0x4227252ddad55751d45c9396f3522363a4a52014",
       "MapFacet": "0xdb284318b273f83ef8c07f4e0bf7927bca81f2b3",
-      "RoleFacet": "0xe725e7dd1016fd3b7f59634cdd9a38a5ded9276c",
-      "ReadFacet": "0x3c0c6f3f9b4c1974734d3765a1adf76630014261",
+      "RoleFacet": "0x56a628eD7b0BEB6EB927CF86fC4155169c64322d",
+      "ReadFacet": "0xA95f1Bf0E7c6ea3888ED34440c1A34177d9327D8",
       "SocialFacet": "0x10683a5b668ae33e69b75fb703d70aa9ba998c7b",
       "DiamondLoupeFacet": "0xd657a99930eae19f1ea5833a0dc5a3309baed25e"
     }

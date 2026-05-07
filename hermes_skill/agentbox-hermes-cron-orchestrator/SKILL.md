@@ -1,6 +1,6 @@
 ---
 name: agentbox-hermes-cron-orchestrator
-description: Dedicated skill for creating, updating, and maintaining Agentbox background cron jobs in Hermes. It is suitable for long-running background operation, updating existing background tasks, creating or adjusting daily report tasks, and changing the current gameplay goal.
+description: Dedicated skill for creating, updating, and maintaining Agentbox background cron jobs in Hermes. It is suitable for long-running background operation, updating existing background tasks, and changing the current gameplay goal.
 requires_toolsets: [terminal, file, skills, cronjob]
 requires_tools: [terminal, read_file, cronjob]
 ---
@@ -13,15 +13,8 @@ This skill is responsible for:
 
 - creating Hermes-native Agentbox background cron jobs
 - updating existing background jobs instead of creating duplicates
-- creating or updating a dedicated daily report cron job for Agentbox
 - persisting runtime state in `~/.hermes/agentbox/background_runner_state.json`
 - updating the goal and state-inheritance flow of existing background jobs when the user changes the gameplay goal
-
-## Important Conventions
-
-- When the user asks to "run the game in the background", the default behavior should be to create or update two jobs together:
-  - `agentbox-background-runner`: continuously advances gameplay
-  - `agentbox-daily-report`: generates a daily game report
 
 ## cron job delivery
 
@@ -33,36 +26,6 @@ Reason:
 
 - background gameplay loops usually should not proactively post high-frequency progress to external chat channels
 - this keeps routine execution quiet and avoids turning the runner into notification spam
-
-For daily report jobs, silent mode should not be the default.
-
-If the user does not explicitly say "do not send", the agent should first check whether a usable delivery route exists. The priority order should be:
-
-- first use the job's `origin` if it is already a valid deliverable source
-- if no usable `origin` exists, prefer a Hermes-configured home channel / home target
-- if the home target is unavailable, try another route that Hermes can already verify, has recently delivered through, or can infer directly from local state
-
-If a usable route exists, explicitly set:
-
-- `deliver = "<resolved_route>"`
-
-Where `<resolved_route>` may be:
-
-- `origin`
-- `telegram`
-- `discord`
-- `slack`
-- or any other Hermes-supported delivery platform
-
-If the selected route still requires extra target information, channel naming, or a concrete recipient, the agent should continue resolving that Hermes-side target automatically instead of asking the user to restate it.
-
-If the current route is missing a required target and local state cannot resolve it, try the next usable route.
-
-Only fall back to:
-
-- `deliver = "local"`
-
-after all candidate delivery routes fail to produce a valid deliverable path.
 
 
 ## Core Principles
@@ -115,28 +78,6 @@ Notes:
 - it wakes up on a fixed 30-minute interval
 - whether it should actually perform on-chain actions is decided by `next_check_time` inside the prompt
 - if the current time has not yet reached `next_check_time`, the run should only read and record state, and should not perform any new on-chain write
-- the agent should also create or update the daily report job together with it
-
-## Default Daily Report Job Conventions
-
-Recommended defaults:
-
-- job name: `agentbox-daily-report`
-- schedule: `every 24h`
-- deliver:
-  - if a usable delivery route exists, explicitly set the corresponding Hermes route
-  - otherwise fall back to `local`
-- attached skills:
-  - `agentbox-hermes-skills`
-  - `agentbox-hermes-cron-orchestrator`
-- prompt template:
-  - `agentbox_skills/docs/HERMES_DAILY_REPORT_PROMPT.md`
-
-Notes:
-
-- the daily report job should stay separate from the gameplay runner
-- the daily report job is mainly responsible for summarizing the last 24 hours of progress, outputs, and exceptions, rather than driving new on-chain actions
-- Hermes tracks `last_delivery_error` separately, so the daily report job should prioritize successful report generation first, then best-effort external delivery through Hermes' native delivery model
 
 ## Create/Update Priority
 
@@ -149,9 +90,6 @@ Use:
 If the user asks for background operation, check separately:
 
 - whether a gameplay runner job already exists
-- whether a daily report job already exists
-
-By default, both should exist. Create whichever one is missing.
 
 ### 2. Update first if one already exists
 
@@ -187,15 +125,6 @@ At minimum, check and update these parts as needed:
 
 - the gameplay runner job's `prompt`
 - goal-related fields in `~/.hermes/agentbox/background_runner_state.json`, such as `goal_id`, `operation_goal`, `stop_reason`, and `next_check_time`
-- if the daily report should reflect the new goal framing, also update the daily report job's prompt wording
-
-### 5. If the user asks to add a daily report job
-
-First determine whether a dedicated daily report job already exists:
-
-- if a dedicated daily report job already exists, update it first
-- if only a gameplay runner exists, do not automatically mix reporting logic into it
-- it is better to create a separate daily report job with a clearer responsibility boundary
 
 ## Prompt Requirements
 
@@ -208,11 +137,6 @@ When creating a Hermes gameplay runner job, prefer:
 
 - `agentbox_skills/docs/HERMES_CRON_PROMPT.md`
 - `agentbox_skills/docs/HERMES_CRON_PROMPT_CN.md`
-
-When creating a Hermes daily report job, prefer:
-
-- `agentbox_skills/docs/HERMES_DAILY_REPORT_PROMPT.md`
-- `agentbox_skills/docs/HERMES_DAILY_REPORT_PROMPT_CN.md`
 
 Do not copy the OpenClaw prompts unchanged.
 
@@ -235,13 +159,9 @@ The stored state should at least include:
 
 - explain outcomes to the user in semantic, plain language
 - unless the user explicitly asks for it, do not create multiple duplicate background jobs
-- if the user simply wants stable background operation, create both the gameplay runner job and the daily report job by default
 - if the user simply wants stable background operation, default to `every 30m`
 - if the user asks to "change the gameplay goal", this skill should also be consulted; prefer updating the existing background job prompt and state files instead of only describing the change in the current chat
-- if the user asks for "generate a daily report every day", default to `every 24h`
 - background runner jobs should default to `deliver = local`
-- if the user does not explicitly say "do not send", daily report jobs should prefer finding a usable delivery route and explicitly setting `deliver`
-- if no delivery route can be resolved, daily report jobs should fall back to `local` instead of leaving delivery ambiguous
 
 ## Success Feedback
 

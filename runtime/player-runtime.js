@@ -9,6 +9,7 @@ import {
   PROFILE_MODE,
   READ_SOURCE,
   ROLE,
+  ROLE_STATE_ATTACKING,
   ROLE_STATE_CRAFTING,
   ROLE_STATE_GATHERING,
   ROLE_STATE_IDLE,
@@ -38,6 +39,7 @@ import {
   txError,
 } from "./common.js";
 import { ActiveRoleStore, AgentboxClient, SignerStore } from "./clients.js";
+import { OperationStore } from "./operations.js";
 import { loadSettings } from "./settings.js";
 
 function learnedSkillIds(me) {
@@ -55,6 +57,44 @@ function toFiniteNumber(value) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
+const OPERATION_ACTION = {
+  type: "object",
+  properties: {
+    actionId: STRING,
+    type: STRING,
+    toolName: STRING,
+    params: { type: "object", additionalProperties: true },
+    expectedResult: STRING,
+  },
+  required: ["type"],
+  additionalProperties: true,
+};
+
+const OPERATION_ACTION_LIST = {
+  type: "array",
+  items: OPERATION_ACTION,
+};
+
+const OPERATION_STATUS = {
+  type: "string",
+  enum: ["planned", "running", "completed", "failed", "cancelled", "blocked"],
+};
+
+const ACTION_STATUS = {
+  type: "string",
+  enum: ["pending", "in_progress", "completed", "failed", "skipped", "cancelled"],
+};
+
+function isAutoRecordedWriteTool(toolName) {
+  if (!toolName.startsWith("agentbox.skills.")) return false;
+  return !toolName.includes(".read_") &&
+    !toolName.includes(".check_") &&
+    !toolName.includes(".summarize_") &&
+    !toolName.startsWith("agentbox.skills.read_") &&
+    !toolName.startsWith("agentbox.skills.check_") &&
+    !toolName.startsWith("agentbox.skills.summarize_");
+}
+
 export function buildToolSpecs() {
   return [
     { name: "agentbox.signer.prepare", description: "Create the single local gameplay private key. If a signer already exists, replacing it requires force=true, backupConfirmed=true, and confirmSignerReplacement=true.", parameters: obj({ label: STRING, force: BOOL, backupConfirmed: BOOL, confirmSignerReplacement: BOOL }) },
@@ -66,6 +106,15 @@ export function buildToolSpecs() {
     { name: "agentbox.roles.read_active", description: "Read the currently selected active role.", parameters: obj({}) },
     { name: "agentbox.roles.select_active", description: "Select the active role used when role is omitted.", parameters: obj({ roleWallet: ROLE, roleId: UINT }) },
     { name: "agentbox.roles.clear_active", description: "Clear the currently selected active role.", parameters: obj({}) },
+    { name: "agentbox.operations.read_state", description: "Read the local operation manager state for the active role.", parameters: obj({ role: ROLE }) },
+    { name: "agentbox.operations.add_plan", description: "Add a structured future operation plan for the active role.", parameters: obj({ role: ROLE, goal: STRING, actions: OPERATION_ACTION_LIST, priority: UINT, source: STRING }, ["goal", "actions"]) },
+    { name: "agentbox.operations.start_next", description: "Move the highest-priority planned operation into currentOperation if no operation is currently running.", parameters: obj({ role: ROLE }) },
+    { name: "agentbox.operations.next_action", description: "Read the next pending action from the current operation.", parameters: obj({ role: ROLE }) },
+    { name: "agentbox.operations.update_action", description: "Update one action inside an operation.", parameters: obj({ role: ROLE, operationId: STRING, actionId: STRING, status: ACTION_STATUS, txHash: STRING, blockNumber: UINT, chainId: UINT, errorCode: STRING, errorMessage: STRING, note: STRING }, ["operationId", "actionId", "status"]) },
+    { name: "agentbox.operations.finish_current", description: "Finish the current operation and move it to completedOperations.", parameters: obj({ role: ROLE, status: OPERATION_STATUS, note: STRING }) },
+    { name: "agentbox.operations.cancel_current", description: "Cancel the current operation and move it to completedOperations.", parameters: obj({ role: ROLE, note: STRING }) },
+    { name: "agentbox.operations.clear_completed", description: "Clear completed operation history for the active role.", parameters: obj({ role: ROLE }) },
+    { name: "agentbox.operations.reconcile", description: "Conservatively compare operation state with chain state and optionally apply safe operation-state updates.", parameters: obj({ role: ROLE, apply: BOOL }) },
     { name: "agentbox.skills.read_role_snapshot", description: "Read the current role snapshot grouped into staticInfo and dynamicInfo.", parameters: obj({ role: ROLE, source: READ_SOURCE }) },
     { name: "agentbox.skills.read_world_static_info", description: "Read lower-frequency world facts used for planning.", parameters: obj({ role: ROLE, source: READ_SOURCE }) },
     { name: "agentbox.skills.read_world_dynamic_info", description: "Read frequently changing world facts near the current role.", parameters: obj({ role: ROLE, source: READ_SOURCE }) },
@@ -84,6 +133,7 @@ export function buildToolSpecs() {
     { name: "agentbox.skills.learn.player.accept", description: "Accept teaching another player.", parameters: obj({ role: ROLE, studentWallet: TARGET_WALLET }, ["role", "studentWallet"]) },
     { name: "agentbox.skills.craft.start", description: "Start crafting a recipe.", parameters: obj({ role: ROLE, recipeId: UINT }, ["role", "recipeId"]) },
     { name: "agentbox.skills.combat.attack", description: "Attack another nearby player.", parameters: obj({ role: ROLE, targetWallet: TARGET_WALLET }, ["role", "targetWallet"]) },
+    { name: "agentbox.skills.combat.start_attack", description: "Start an asynchronous attack against another nearby player.", parameters: obj({ role: ROLE, targetWallet: TARGET_WALLET }, ["role", "targetWallet"]) },
     { name: "agentbox.skills.equip.put_on", description: "Equip an owned equipment item.", parameters: obj({ role: ROLE, equipmentId: UINT }, ["role", "equipmentId"]) },
     { name: "agentbox.skills.equip.take_off", description: "Unequip an equipment slot.", parameters: obj({ role: ROLE, slot: UINT }, ["role", "slot"]) },
     { name: "agentbox.skills.land.buy", description: "Buy the current target land.", parameters: obj({ role: ROLE, x: UINT, y: UINT }, ["role", "x", "y"]) },
@@ -113,6 +163,7 @@ export class JSPlayerRuntime {
     this.client = new AgentboxClient(this.settings);
     this.signers = new SignerStore(this.settings);
     this.activeRoles = new ActiveRoleStore(this.settings);
+    this.operations = new OperationStore(this.settings);
     this.toolSpecs = buildToolSpecs();
     this.tools = new Map(this.toolSpecs.map((tool) => [tool.name, tool]));
   }
@@ -132,9 +183,40 @@ export class JSPlayerRuntime {
       if (!tool) return errorResult(toolName, precheckError("UNKNOWN_TOOL", `Unknown tool: ${toolName}`));
       const params = await this.normalizeToolPayload(tool, payload || {});
       this.validateToolPayload(tool, params);
+      if (isAutoRecordedWriteTool(toolName)) return await this.invokeWithOperationRecording(toolName, params);
       return await this.dispatch(toolName, params);
     } catch (error) {
       return errorResult(toolName, error);
+    }
+  }
+
+  async invokeWithOperationRecording(toolName, params) {
+    const role = await this.operationRoleForPayload(params);
+    let tracking = null;
+    if (role) {
+      try {
+        tracking = this.operations.markWriteStarted(role, toolName, params);
+      } catch {
+        tracking = null;
+      }
+    }
+    try {
+      const result = await this.dispatch(toolName, params);
+      if (role) {
+        try {
+          if (result?.ok) this.operations.markWriteFinished(role, tracking, toolName, params, result);
+          else this.operations.markWriteFailed(role, tracking, toolName, params, result);
+        } catch {}
+      }
+      return result;
+    } catch (error) {
+      const result = errorResult(toolName, error);
+      if (role) {
+        try {
+          this.operations.markWriteFailed(role, tracking, toolName, params, result);
+        } catch {}
+      }
+      return result;
     }
   }
 
@@ -168,6 +250,15 @@ export class JSPlayerRuntime {
       case "agentbox.roles.read_active": return this.readActiveRole();
       case "agentbox.roles.select_active": return this.selectActiveRole(payload);
       case "agentbox.roles.clear_active": return this.clearActiveRole();
+      case "agentbox.operations.read_state": return this.operationReadState(payload);
+      case "agentbox.operations.add_plan": return this.operationAddPlan(payload);
+      case "agentbox.operations.start_next": return this.operationStartNext(payload);
+      case "agentbox.operations.next_action": return this.operationNextAction(payload);
+      case "agentbox.operations.update_action": return this.operationUpdateAction(payload);
+      case "agentbox.operations.finish_current": return this.operationFinishCurrent(payload);
+      case "agentbox.operations.cancel_current": return this.operationCancelCurrent(payload);
+      case "agentbox.operations.clear_completed": return this.operationClearCompleted(payload);
+      case "agentbox.operations.reconcile": return this.operationReconcile(payload);
       case "agentbox.skills.read_role_snapshot": return this.readRoleSnapshot(payload.role, payload.source);
       case "agentbox.skills.read_world_static_info": return this.readWorldStaticInfo(payload.role, payload.source);
       case "agentbox.skills.read_world_dynamic_info": return this.readWorldDynamicInfo(payload.role, payload.source);
@@ -186,6 +277,7 @@ export class JSPlayerRuntime {
       case "agentbox.skills.learn.player.accept": return this.coreWrite(toolName, "acceptTeaching", [payload.role, payload.studentWallet], "Teaching acceptance submitted", { roleWallet: payload.role, allowedStates: new Set([ROLE_STATE_IDLE]), targetWallet: payload.studentWallet });
       case "agentbox.skills.craft.start": return this.coreWrite(toolName, "startCrafting", [payload.role, Number(payload.recipeId)], "Crafting started", { roleWallet: payload.role, allowedStates: new Set([ROLE_STATE_IDLE]) });
       case "agentbox.skills.combat.attack": return this.coreWrite(toolName, "attack", [payload.role, payload.targetWallet], "Attack submitted", { roleWallet: payload.role, allowedStates: new Set([ROLE_STATE_IDLE]), targetWallet: payload.targetWallet });
+      case "agentbox.skills.combat.start_attack": return this.coreWrite(toolName, "startAttack", [payload.role, payload.targetWallet], "Attack started", { roleWallet: payload.role, allowedStates: new Set([ROLE_STATE_IDLE]), targetWallet: payload.targetWallet });
       case "agentbox.skills.equip.put_on": return this.coreWrite(toolName, "equip", [payload.role, Number(payload.equipmentId)], "Equip transaction submitted", { roleWallet: payload.role, allowedStates: new Set([ROLE_STATE_IDLE]) });
       case "agentbox.skills.equip.take_off": return this.coreWrite(toolName, "unequip", [payload.role, Number(payload.slot)], "Unequip transaction submitted", { roleWallet: payload.role, allowedStates: new Set([ROLE_STATE_IDLE]) });
       case "agentbox.skills.land.buy": return this.coreWrite(toolName, "buyLand", [payload.role, Number(payload.x), Number(payload.y)], "Buy land transaction submitted", { roleWallet: payload.role, landXy: [Number(payload.x), Number(payload.y)] });
@@ -213,6 +305,32 @@ export class JSPlayerRuntime {
   async resolveDefaultRole() {
     const activeRole = await this.requireValidatedActiveRole();
     return activeRole.roleWallet;
+  }
+
+  async operationRoleForPayload(payload = {}) {
+    if (payload.role) {
+      return {
+        roleId: null,
+        roleWallet: payload.role,
+        ownerAddress: null,
+      };
+    }
+    try {
+      return await this.requireValidatedActiveRole();
+    } catch {
+      return null;
+    }
+  }
+
+  async resolveOperationRole(roleWallet) {
+    if (roleWallet) {
+      return {
+        roleId: null,
+        roleWallet,
+        ownerAddress: null,
+      };
+    }
+    return await this.requireValidatedActiveRole();
   }
 
   requireActiveSigner() {
@@ -248,7 +366,7 @@ export class JSPlayerRuntime {
   async requireValidatedActiveRole() {
     const record = this.activeRoles.loadRecord();
     if (!record?.roleWallet) {
-      throw precheckError("MISSING_ACTIVE_ROLE", "No active role is selected. Use agentbox.roles.list_owned and agentbox.roles.select_active first");
+      throw precheckError("MISSING_ACTIVE_ROLE", "No active role is selected. Open the Agentbox web Account panel and select an active role first");
     }
     const { ownerAddress, ownedRoles } = await this.ownedRolesForActiveSigner();
     const ownedRole = ownedRoles.find((item) => item.roleWallet.toLowerCase() === record.roleWallet.toLowerCase());
@@ -304,23 +422,70 @@ export class JSPlayerRuntime {
 
   async signerPayload() {
     const { record } = this.signers.loadActiveWallet(this.client.provider);
-    if (!record) return { hasSigner: false, signer: null };
-    const balance = await this.client.getBalance(record.address);
-    const ownedRoles = await this.client.listOwnedRoles(record.address);
-    const activeRoleState = await this.maybeReadActiveRole();
+    let registrationFeeEth = null;
+    const warnings = [];
+    try {
+      registrationFeeEth = this.client.formatEth(await this.client.getRegistrationFeeWei());
+    } catch (error) {
+      warnings.push({
+        field: "registrationFeeEth",
+        errorCode: error?.errorCode || error?.code || "REGISTRATION_FEE_READ_FAILED",
+        errorMessage: error?.message || String(error),
+      });
+    }
+    if (!record) return { hasSigner: false, signer: null, registrationFeeEth };
+    let balanceEth = null;
+    let ownedRolesCount = null;
+    let activeRoleState = {
+      hasActiveRole: false,
+      activeRole: null,
+      isOwnedByActiveSigner: false,
+    };
+    try {
+      const balance = await this.client.getBalance(record.address);
+      balanceEth = this.client.formatEth(balance);
+    } catch (error) {
+      warnings.push({
+        field: "signer.balanceEth",
+        errorCode: error?.errorCode || error?.code || "SIGNER_BALANCE_READ_FAILED",
+        errorMessage: error?.message || String(error),
+      });
+    }
+    try {
+      const ownedRoles = await this.client.listOwnedRoles(record.address);
+      ownedRolesCount = ownedRoles.length;
+    } catch (error) {
+      warnings.push({
+        field: "ownedRolesCount",
+        errorCode: error?.errorCode || error?.code || "OWNED_ROLES_READ_FAILED",
+        errorMessage: error?.message || String(error),
+      });
+    }
+    try {
+      activeRoleState = await this.maybeReadActiveRole();
+      if (activeRoleState.warning) warnings.push({ field: "activeRole", ...activeRoleState.warning });
+    } catch (error) {
+      warnings.push({
+        field: "activeRole",
+        errorCode: error?.errorCode || error?.code || "ACTIVE_ROLE_READ_FAILED",
+        errorMessage: error?.message || String(error),
+      });
+    }
     return {
       hasSigner: true,
       signer: {
         signerId: record.signer_id,
         address: record.address,
         label: record.label,
-        balanceEth: this.client.formatEth(balance),
+        balanceEth,
         hasPrivateKey: true,
       },
-      ownedRolesCount: ownedRoles.length,
+      registrationFeeEth,
+      ownedRolesCount,
       activeRole: activeRoleState.activeRole,
       hasActiveRole: activeRoleState.hasActiveRole,
       activeRoleOwnedBySigner: activeRoleState.isOwnedByActiveSigner,
+      warnings,
     };
   }
 
@@ -446,6 +611,75 @@ export class JSPlayerRuntime {
     });
   }
 
+  async operationReadState({ role }) {
+    const operationRole = await this.resolveOperationRole(role);
+    return successResult("agentbox.operations.read_state", "Loaded operation state", {
+      data: this.operations.readState(operationRole),
+    });
+  }
+
+  async operationAddPlan(payload) {
+    const operationRole = await this.resolveOperationRole(payload.role);
+    const state = this.operations.addPlan(operationRole, {
+      goal: payload.goal,
+      actions: payload.actions,
+      priority: payload.priority,
+      source: payload.source,
+    });
+    return successResult("agentbox.operations.add_plan", "Added operation plan", { data: state });
+  }
+
+  async operationStartNext({ role }) {
+    const operationRole = await this.resolveOperationRole(role);
+    return successResult("agentbox.operations.start_next", "Started next planned operation if available", {
+      data: this.operations.startNext(operationRole),
+    });
+  }
+
+  async operationNextAction({ role }) {
+    const operationRole = await this.resolveOperationRole(role);
+    const data = this.operations.nextAction(operationRole);
+    return successResult("agentbox.operations.next_action", "Loaded next operation action", { data });
+  }
+
+  async operationUpdateAction(payload) {
+    const operationRole = await this.resolveOperationRole(payload.role);
+    const state = this.operations.updateAction(operationRole, payload);
+    return successResult("agentbox.operations.update_action", "Updated operation action", { data: state });
+  }
+
+  async operationFinishCurrent(payload) {
+    const operationRole = await this.resolveOperationRole(payload.role);
+    const state = this.operations.finishCurrent(operationRole, {
+      status: payload.status || "completed",
+      note: payload.note,
+    });
+    return successResult("agentbox.operations.finish_current", "Finished current operation", { data: state });
+  }
+
+  async operationCancelCurrent(payload) {
+    const operationRole = await this.resolveOperationRole(payload.role);
+    const state = this.operations.cancelCurrent(operationRole, { note: payload.note });
+    return successResult("agentbox.operations.cancel_current", "Cancelled current operation", { data: state });
+  }
+
+  async operationClearCompleted({ role }) {
+    const operationRole = await this.resolveOperationRole(role);
+    return successResult("agentbox.operations.clear_completed", "Cleared completed operation history", {
+      data: this.operations.clearCompleted(operationRole),
+    });
+  }
+
+  async operationReconcile(payload) {
+    const operationRole = await this.resolveOperationRole(payload.role);
+    let chainState = null;
+    try {
+      chainState = (await this.readRoleSnapshot(operationRole.roleWallet, "chain")).data;
+    } catch {}
+    const data = this.operations.reconcile(operationRole, { apply: payload.apply === true }, chainState);
+    return successResult("agentbox.operations.reconcile", "Reconciled operation state with chain state", { data });
+  }
+
   async selectReadSource(requestedSource, { indexerSupported }) {
     const source = requestedSource || "auto";
     if (!["auto", "chain", "indexer"].includes(source)) throw precheckError("INVALID_READ_SOURCE", "source must be auto, chain, or indexer");
@@ -506,6 +740,9 @@ export class JSPlayerRuntime {
         gatheringRequiredBlocks: action.gathering_required_blocks ?? 0,
         gatheringTargetLandId: action.gathering_target_land_id ?? 0,
         gatheringAmount: action.gathering_amount ?? 0,
+        attackStartBlock: action.attack_start_block ?? 0,
+        attackRequiredBlocks: action.attack_required_blocks ?? 0,
+        attackTargetWallet: action.attack_target_wallet ?? ZERO_ADDRESS,
       }),
       balances: {
         totalBalance: balance.agc_balance ?? 0,
@@ -729,6 +966,9 @@ export class JSPlayerRuntime {
       } : {}),
       ...(Number(action.teachingSkillId || 0) > 0 ? {
         teachingSkillName: skillNameFromId(action.teachingSkillId),
+      } : {}),
+      ...(action.attackTargetWallet && action.attackTargetWallet !== ZERO_ADDRESS ? {
+        attackTargetLabel: action.attackTargetWallet,
       } : {}),
     };
   }
@@ -1142,6 +1382,7 @@ export class JSPlayerRuntime {
     if (state === ROLE_STATE_CRAFTING) return this.coreWrite("agentbox.skills.craft.finish", "finishCrafting", [roleWallet], "Crafting completed", { roleWallet, allowedStates: new Set([ROLE_STATE_CRAFTING]), finishable: true });
     if (state === ROLE_STATE_GATHERING) return this.coreWrite("agentbox.skills.gather.finish", "finishGather", [roleWallet], "Gathering completed", { roleWallet, allowedStates: new Set([ROLE_STATE_GATHERING]), finishable: true });
     if (state === ROLE_STATE_TELEPORTING) return this.coreWrite("agentbox.skills.teleport.finish", "finishTeleport", [roleWallet], "Teleport completed", { roleWallet, allowedStates: new Set([ROLE_STATE_TELEPORTING]), finishable: true });
+    if (state === ROLE_STATE_ATTACKING) return this.coreWrite("agentbox.skills.attack.finish", "finishAttack", [roleWallet], "Attack completed", { roleWallet, allowedStates: new Set([ROLE_STATE_ATTACKING]), finishable: true });
     throw precheckError("FINISH_NOT_SUPPORTED", "Current finishable state is not mapped to a finish action", {
       state,
       chainRoleState,
@@ -1162,9 +1403,18 @@ export class JSPlayerRuntime {
   async cancelCurrentAction(roleWallet) {
     const me = (await this.readMe(roleWallet, "chain")).data;
     const state = normalizeRoleState(me.role?.state);
-    if (state === ROLE_STATE_LEARNING) return this.coreWrite("agentbox.skills.learn.cancel", "cancelLearning", [roleWallet], "Learning cancelled", { roleWallet, allowedStates: new Set([ROLE_STATE_LEARNING]) });
-    if (state === ROLE_STATE_TEACHING) return this.coreWrite("agentbox.skills.teach.cancel", "cancelTeaching", [roleWallet], "Teaching cancelled", { roleWallet, allowedStates: new Set([ROLE_STATE_TEACHING]) });
-    throw precheckError("CANCEL_NOT_SUPPORTED", "Current state does not support cancel", { state });
+    const cancelableStates = new Set([
+      ROLE_STATE_LEARNING,
+      ROLE_STATE_TEACHING,
+      ROLE_STATE_CRAFTING,
+      ROLE_STATE_GATHERING,
+      ROLE_STATE_TELEPORTING,
+      ROLE_STATE_ATTACKING,
+    ]);
+    if (!cancelableStates.has(state)) {
+      throw precheckError("CANCEL_NOT_SUPPORTED", "Current state does not support cancel", { state });
+    }
+    return this.coreWrite("agentbox.skills.cancel_current_action", "cancelCurrentAction", [roleWallet], "Current action cancelled", { roleWallet, allowedStates: cancelableStates });
   }
 
   async stabilizeBalance(roleWallet) {
@@ -1277,6 +1527,10 @@ export class JSPlayerRuntime {
       requiredSkillId: resourceType || null,
       requiredSkillName: resourceType > 0 ? skillNameFromId(resourceType) : null,
       resourceTypeName: resourceType > 0 ? resourceNameFromId(resourceType) : null,
+      resourcePointActiveGathererLimit: 10,
+      resourcePointActiveGathererCountKnown: false,
+      chainLimitNote: "The contract also enforces a maximum of 10 active gatherers per resource point. This runtime cannot pre-read the current active gatherer count yet, so startGather may still revert if the resource point is already full.",
+      warnings: currentLand.isResourcePoint ? ["resource_point_active_gatherer_count_not_readable"] : [],
       learnedSkillIds: [...learned].sort(),
       learnedSkillNames: [...learned].sort((a, b) => a - b).map((item) => skillNameFromId(item)),
       reasons,
@@ -1541,8 +1795,10 @@ export class JSPlayerRuntime {
     }
     }
 
+    const registrationFeeWei = await this.client.getRegistrationFeeWei();
     let currentBalanceWei = await this.client.getBalance(wallet.address);
-    const minimumBalanceWei = ethers.parseEther(this.settings.minNativeBalanceEth);
+    const configuredMinimumBalanceWei = ethers.parseEther(this.settings.minNativeBalanceEth);
+    const minimumBalanceWei = registrationFeeWei > configuredMinimumBalanceWei ? registrationFeeWei : configuredMinimumBalanceWei;
     if (currentBalanceWei < minimumBalanceWei) {
       return this.topUpResult(wallet.address, currentBalanceWei, minimumBalanceWei, {
         stage: "before_role_create",
@@ -1550,7 +1806,7 @@ export class JSPlayerRuntime {
         ownedRolesCount: ownedRolesBefore.length,
       });
     }
-    const createRequiredWei = await this.client.estimateRequiredBalance(this.client.core, resolved.nickname ? "createCharacter" : "createCharacter", resolved.nickname ? [resolved.nickname, resolved.gender] : [], wallet, ethers.parseEther(this.settings.registrationValueEth));
+    const createRequiredWei = await this.client.estimateRequiredBalance(this.client.core, resolved.nickname ? "createCharacter" : "createCharacter", resolved.nickname ? [resolved.nickname, resolved.gender] : [], wallet, registrationFeeWei);
     const minimumRequired = createRequiredWei > minimumBalanceWei ? createRequiredWei : minimumBalanceWei;
     currentBalanceWei = await this.client.getBalance(wallet.address);
     if (currentBalanceWei < minimumRequired) {
@@ -1560,7 +1816,7 @@ export class JSPlayerRuntime {
         ownedRolesCount: ownedRolesBefore.length,
       });
     }
-    const tx = await this.client.sendTransaction(this.client.core, resolved.nickname ? "createCharacter" : "createCharacter", resolved.nickname ? [resolved.nickname, resolved.gender] : [], wallet, ethers.parseEther(this.settings.registrationValueEth));
+    const tx = await this.client.sendTransaction(this.client.core, resolved.nickname ? "createCharacter" : "createCharacter", resolved.nickname ? [resolved.nickname, resolved.gender] : [], wallet, registrationFeeWei);
     const ownedRolesAfter = await this.client.listOwnedRoles(wallet.address);
     const previousWallets = new Set(ownedRolesBefore.map((item) => item.roleWallet.toLowerCase()));
     const created = ownedRolesAfter.find((item) => !previousWallets.has(item.roleWallet.toLowerCase())) || ownedRolesAfter[ownedRolesAfter.length - 1];
@@ -1585,6 +1841,7 @@ export class JSPlayerRuntime {
         gender: resolved.gender,
         activeSigner,
         activeSignerBalanceEth: activeSigner?.balanceEth ?? null,
+        registrationFeeEth: ethers.formatEther(registrationFeeWei),
       },
       txHash: tx.txHash,
       chainId: this.settings.chainId,

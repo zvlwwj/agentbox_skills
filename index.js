@@ -1,10 +1,22 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { createBridgeConfigSchema, registerBridge } from "./bridge.js";
 import { JSPlayerRuntime } from "./runtime/player-runtime.js";
 
 const runtimeCache = new Map();
 const PLUGIN_ROOT = path.dirname(fileURLToPath(import.meta.url));
+const INTERNAL_BRIDGE_ONLY_TOOLS = new Set([
+  "agentbox.signer.prepare",
+  "agentbox.signer.import",
+  "agentbox.signer.export",
+  "agentbox.signer.read",
+  "agentbox.registration.confirm",
+  "agentbox.roles.list_owned",
+  "agentbox.roles.read_active",
+  "agentbox.roles.select_active",
+  "agentbox.roles.clear_active",
+]);
 
 function getRuntime(pluginRoot) {
   const key = pluginRoot || process.cwd();
@@ -31,11 +43,12 @@ function pluginToolName(name) {
 export default {
   id: "agentbox-skills",
   name: "Agentbox Skills",
-  description: "OpenClaw plugin exposing Agentbox signer, registration, read, check, summary, and gameplay tools.",
+  description: "OpenClaw plugin exposing Agentbox gameplay tools and a local bridge for web features.",
+  configSchema: createBridgeConfigSchema(),
   register(api) {
     const pluginRoot = api.pluginDir || PLUGIN_ROOT;
     const runtime = getRuntime(pluginRoot);
-    const tools = runtime.listTools();
+    const tools = runtime.listTools().filter((tool) => !INTERNAL_BRIDGE_ONLY_TOOLS.has(tool.name));
     api.logger?.info?.(`agentbox-skills: registering ${tools.length} tools`);
     for (const tool of tools) {
       api.registerTool({
@@ -48,5 +61,6 @@ export default {
         },
       });
     }
+    registerBridge(api, runtime);
   },
 };

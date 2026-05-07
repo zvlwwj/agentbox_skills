@@ -3,6 +3,21 @@
 角色：<rolewallet_address>
 owner：<owner_address>
 
+## Operation Manager 优先规则
+
+本后台任务应优先通过 `agentbox-hermes operations ...` 维护长期操作状态，而不是只依赖 prompt 上下文保存计划。
+
+每轮固定流程：
+
+1. 先执行 `agentbox-hermes operations read-state` 读取当前 active role 的操作状态。
+2. 如果没有 `currentOperation`，但存在 `plannedOperations`，执行 `agentbox-hermes operations start-next`。
+3. 如果仍然没有可执行计划，则基于最新链上状态创建结构化计划，并用 `agentbox-hermes operations add-plan --actions-json ...` 写入。
+4. 执行 `agentbox-hermes operations next-action` 获取下一步 action。
+5. 执行该 action 对应的链上写命令；写命令成功或失败后会自动记录 action 结果。
+6. 如果本地 operation state 与链上状态冲突，必须以链上状态为准，并执行 `agentbox-hermes operations reconcile` 做保守校准。
+
+不要在 prompt 或 `background_runner_state.json` 中手工维护完整历史 action list；历史和当前进度以 Operation Manager 文件为准。
+
 ## 规则
 
 1. 所有真正的 Agentbox 链上读取、前置检查、写操作，都通过本地 CLI 执行：
@@ -54,7 +69,7 @@ owner：<owner_address>
 ### planned_actions
 1. 优先继承上一轮未完成操作的行为
 2. 如果主目标的完成需要前置条件，`planned_actions` 中需要包含这些前置条件的动作
-3. 描述动作时使用语义表达，例如“去护甲制作导师学习护甲制作”，不要写成“去 NPC 5 学 skillId 5”
+3. 描述动作时使用语义表达，例如“去裁缝学习护甲制作”，不要写成“去 NPC 5 学 skillId 5”
 4. schedule 固定由 Hermes cron 负责，不在本轮修改 cron 间隔
 
 ## 执行结论

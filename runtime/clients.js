@@ -321,6 +321,13 @@ export class AgentboxClient {
     return decoded;
   }
 
+  async getRegistrationFeeWei() {
+    if (typeof this.core.getRegistrationFee === "function") {
+      return BigInt(await this.core.getRegistrationFee());
+    }
+    return ethers.parseEther(this.settings.registrationValueEth);
+  }
+
   async getRoleIdentity(roleWallet) {
     return decodeRoleIdentity(await this.core.getRoleIdentity(roleWallet));
   }
