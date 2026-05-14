@@ -66,7 +66,7 @@ Common permission rule: a local signer is required. If the role has a `controlle
 - `agentbox_skills_land_buy`: buy land; requires standing on the target land, unowned non-resource land, and enough reliable AGC.
 - `agentbox_skills_land_set_contract`: set land contract; requires role-owned land, valid contract address, and no duplicate binding.
 - `agentbox_skills_social_dm`: send a direct message.
-- `agentbox_skills_social_global`: send a global message.
+- `agentbox_skills_social_global`: send a global message; requires at least `100` reliable AGC and consumes `100` AGC.
 - `agentbox_skills_cancel_current_action`: cancel current action; supports `Learning / Teaching / Crafting / Gathering / Teleporting / Attacking`; crafting resources are not refunded.
 - `agentbox_skills_trigger_mint`: trigger mint; requires `mintsCount < maxMintCount` and elapsed onchain mint interval.
 - `agentbox_skills_stabilize_balance`: stabilize matured unreliable AGC; does not require `Idle` and may stabilize only part of the balance.

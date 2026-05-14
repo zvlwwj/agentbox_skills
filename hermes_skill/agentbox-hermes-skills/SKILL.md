@@ -1,76 +1,33 @@
 ---
 name: agentbox-hermes-skills
-description: Base Agentbox gameplay skill for Hermes Agent. Uses Hermes terminal/file/skills tools to call the local agentbox-hermes CLI for signer management, multi-role owners, reads, prerequisite checks, and on-chain actions.
+description: Base Agentbox gameplay skill for Hermes Agent on Base Sepolia. Use Hermes terminal/file/skills tools to call the local agentbox-hermes CLI for gameplay reads, prerequisite checks, Operation Manager, and onchain actions.
 requires_toolsets: [terminal, file, skills]
 requires_tools: [terminal, read_file]
 ---
 
 # Agentbox Hermes Skills
 
-## Purpose
+## Description
 
-This skill lets Hermes Agent manage Agentbox gameplay **without relying on the OpenClaw plugin/runtime**.
+This skill provides Agentbox state reads, prerequisite checks, operation management, and onchain action execution for Hermes Agent.
 
-The real execution entrypoint is the local CLI:
+Use the local CLI for execution:
 
 - Preferred: `agentbox-hermes`
-- Fallback if not on PATH: `~/.hermes/bin/agentbox-hermes`
+- Fallback: `~/.hermes/bin/agentbox-hermes`
 
-Commands return JSON by default. When speaking to users, prefer semantic names rather than raw IDs.
+Commands return JSON by default.
 
-## Local State Paths
+- When `--role` is omitted, commands use the locally stored `active roleWallet`.
+- When speaking to users, prefer semantic names instead of raw IDs. Common ID mappings live in `agentbox_skills/docs/AGENTBOX_ID_SEMANTICS.md`.
 
-Hermes-side Agentbox state is stored at:
+## Command Reference
 
-- `~/.hermes/agentbox/active_signer.json`
-- `~/.hermes/agentbox/active_role.json`
-- `~/.hermes/agentbox/background_runner_state.json`
+### Operation Manager
 
-Rules:
+Background jobs use Operation Manager for long-running operation state; the per-round flow is defined by `agentbox_skills/docs/HERMES_CRON_PROMPT.md`.
 
-- Default role resolution only uses `active_role.json`
-- If there is no active role, do not guess the last owned role; fail explicitly and select one first
-
-## Core Commands
-
-### Signer
-
-- `agentbox-hermes signer prepare`
-- `agentbox-hermes signer import --private-key <KEY>`
-- `agentbox-hermes signer export`
-- `agentbox-hermes signer read`
-- `agentbox-hermes registration confirm --profile-mode auto_generate`
-
-Rules:
-
-- If a local signer already exists, do not create/import another signer by default
-- When the user asks to create a new account, reuse the existing signer by default
-- Only replace the signer when the user explicitly wants to switch owners
-- Before replacing a signer, remind the user to back it up and get explicit confirmation
-
-### Multi-role owners
-
-- `agentbox-hermes roles list-owned`
-- `agentbox-hermes roles read-active`
-- `agentbox-hermes roles select-active --role-wallet <ROLE_WALLET>`
-- `agentbox-hermes roles clear-active`
-
-Recommended flow:
-
-1. `signer read`
-2. `roles list-owned`
-3. `roles select-active` when a default account is needed
-4. Commands without `--role` then use the active role by default
-
-### Operation management
-
-The Operation Manager keeps a local structured operation file for the current `active roleWallet`. It records:
-
-- Completed operations, including each action's execution time, transaction hash, and result
-- The current running operation, including completed and unfinished actions
-- Planned future operations, including each operation's action list
-
-Commands:
+Available commands:
 
 - `agentbox-hermes operations read-state`
 - `agentbox-hermes operations add-plan --goal <GOAL> --actions-json '<JSON_ARRAY>'`
@@ -83,23 +40,14 @@ Commands:
 - `agentbox-hermes operations reconcile`
 - `agentbox-hermes operations reconcile --apply`
 
-For long-running background play, prefer Operation Manager state over manually maintaining a full action history in prompts or chat history:
+### State Reads
 
-1. Run `operations read-state`
-2. If there is no current operation but planned operations exist, run `operations start-next`
-3. Run `operations next-action` to get the next recommended action
-4. Call the matching `agentbox-hermes action ...` write command
-5. The runtime automatically records the write as completed or failed
-6. If local operation state conflicts with onchain state, trust onchain state and run `operations reconcile`
-
-### Reads
-
-- `agentbox-hermes read role-snapshot`
-- `agentbox-hermes read world-static`
-- `agentbox-hermes read world-dynamic`
-- `agentbox-hermes read land --x <X> --y <Y>`
-- `agentbox-hermes read last-mint`
-- `agentbox-hermes read global-config`
+- `agentbox-hermes read role-snapshot`: read the full role snapshot; use `--source chain` when verifying actual onchain state changes.
+- `agentbox-hermes read world-static`: read map config, NPCs, recipes, equipment, and resource-point catalogs.
+- `agentbox-hermes read world-dynamic`: read current block, current land, nearby roles/lands, ground AGC, and recent mint signals.
+- `agentbox-hermes read land --x <X> --y <Y>` or `--land-id <ID>`: read one land in detail. Coordinates are always `(x, y)`; do not split `landId` digits into coordinates.
+- `agentbox-hermes read last-mint`: read the latest mint event.
+- `agentbox-hermes read global-config`: read map, timing, and economy config.
 
 Optional source override:
 
@@ -107,81 +55,46 @@ Optional source override:
 - `--source chain`
 - `--source indexer`
 
-### Prerequisite checks
+### Prerequisite Checks
 
-- `agentbox-hermes check gather --amount <N>`
-- `agentbox-hermes check learn --npc-id <ID>`
-- `agentbox-hermes check craft --recipe-id <ID>`
-- `agentbox-hermes check finishable`
-- `agentbox-hermes check trigger-mint`
-- `agentbox-hermes check stabilize`
+- `agentbox-hermes check finishable`: check whether the current action can finish.
+- `agentbox-hermes check gather --amount <N>`: check gathering prerequisites; each resource point supports at most `10` active gatherers.
+- `agentbox-hermes check learn --npc-id <ID>`: check NPC learning prerequisites.
+- `agentbox-hermes check craft --recipe-id <ID>`: check crafting prerequisites.
+- `agentbox-hermes check trigger-mint`: check mint prerequisites; trust onchain `lastMintBlock` and `mintsCount`, while ground AGC is only a strategy signal.
+- `agentbox-hermes check stabilize`: check whether unreliable AGC is worth attempting to stabilize.
 
-Gathering rule: each resource point supports at most `10` active gatherers at the same time. `check gather` returns this limit; if the current active gatherer count cannot be read directly, `action gather` may still revert when the resource point is already full.
+### Onchain Actions
 
-### Actions
+Common permission rule: a local signer is required. If the role has a `controller`, the signer must be the `controller`; otherwise the signer must be the `owner`.
 
-- `agentbox-hermes action move --x <X> --y <Y>`
-- `agentbox-hermes action teleport --x <X> --y <Y>`
-- `agentbox-hermes action learn --npc-id <ID>`
-- `agentbox-hermes action gather --amount <N>`
-- `agentbox-hermes action craft --recipe-id <ID>`
-- `agentbox-hermes action attack --target-wallet <ADDRESS>`
-- `agentbox-hermes action start-attack --target-wallet <ADDRESS>`
-- `agentbox-hermes action finish`
-- `agentbox-hermes action cancel`
-- `agentbox-hermes action equip --equipment-id <ID>`
-- `agentbox-hermes action unequip --slot <ID>`
-- `agentbox-hermes action trigger-mint`
-- `agentbox-hermes action stabilize`
-- `agentbox-hermes action transfer --amount <N>`
+- `agentbox-hermes action move --x <X> --y <Y>`: move to a coordinate; requires `Idle`, in-bounds target, and distance within `speed`.
+- `agentbox-hermes action teleport --x <X> --y <Y>`: start teleporting; requires `Idle`, in-bounds target, and target not equal to current position.
+- `agentbox-hermes action finish`: finish the current action; requires `finishable.canFinish = true`, supporting `Learning / Crafting / Gathering / Teleporting / Attacking`.
+- `agentbox-hermes action gather --amount <N>`: start gathering; requires `Idle`, standing on a resource point, learned matching skill, and resource point not full.
+- `agentbox-hermes action learn --npc-id <ID>`: learn from an NPC; requires `Idle`, exact NPC coordinate, idle NPC, and unlearned skill.
+- `agentbox-hermes action craft --recipe-id <ID>`: start crafting; requires `Idle`, existing recipe, learned skill, and enough resources.
+- `agentbox-hermes action attack --target-wallet <ADDRESS>`: immediate attack; requires `Idle`, alive target, and target in range.
+- `agentbox-hermes action start-attack --target-wallet <ADDRESS>`: start asynchronous attack; later use `action finish` to settle damage.
+- `agentbox-hermes action equip --equipment-id <ID>`: equip an item; requires `Idle` and role-owned equipment.
+- `agentbox-hermes action unequip --slot <ID>`: unequip an item; requires `Idle` and occupied slot.
+- `agentbox-hermes action cancel`: cancel current action; supports `Learning / Teaching / Crafting / Gathering / Teleporting / Attacking`; crafting resources are not refunded.
+- `agentbox-hermes action trigger-mint`: trigger mint; requires `mintsCount < maxMintCount` and elapsed onchain mint interval.
+- `agentbox-hermes action stabilize`: stabilize matured unreliable AGC; does not require `Idle` and may stabilize only part of the balance.
+- `agentbox-hermes action transfer --amount <N>`: transfer reliable AGC from the role wallet back to owner; only reliable AGC can be transferred.
 
-## User-facing language
+## User-Facing Language
 
-- Prefer semantic names such as:
-  - `Blacksmith`
-  - `Armor crafting`
-  - `Shoes slot`
-- Only include IDs in parentheses for debugging, config validation, or when the user explicitly asks for them
+- Prefer semantic names such as `Blacksmith`, `Armor crafting`, and `Shoes slot`.
+- Only include IDs in parentheses for debugging, config validation, or when the user explicitly asks for them.
 
-For example:
+Example:
 
 - Do not say: `go to npcId=4 and learn skillId=5`
 - Say: `go to the Blacksmith and learn Bow crafting`
 
-## Common workflows
+## Important Boundaries
 
-### 1. First-time setup
-
-1. `agentbox-hermes signer prepare`
-2. `agentbox-hermes signer read`
-3. `agentbox-hermes roles list-owned`
-
-### 2. Switch default account
-
-1. `agentbox-hermes roles list-owned`
-2. `agentbox-hermes roles select-active --role-wallet <ROLE_WALLET>`
-3. `agentbox-hermes roles read-active`
-
-### 3. Create a new account
-
-1. Check whether a signer already exists: `agentbox-hermes signer read`
-2. If a signer exists, reuse it by default; do not prepare/import a new signer
-3. Use:
-   - `agentbox-hermes registration confirm --profile-mode auto_generate`
-   - Registration fee must come from the current onchain `getRegistrationFee()` result. Current tiers are `0.01/0.02/0.03/0.04/0.05 ETH`, fixed at `0.05 ETH` from role `4000` onward.
-4. After success, re-read:
-   - `agentbox-hermes roles list-owned`
-   - `agentbox-hermes roles read-active`
-
-### 4. Safe write flow
-
-1. Read state first
-2. Run prerequisite checks
-3. Execute the action
-4. Re-read key state after the write
-
-## Important boundaries
-
-- Hermes skills are instructions; the CLI performs the real actions
-- Do not assume Hermes has OpenClaw plugin tools
-- Do not rely on chat history for long-running state; persist it under `~/.hermes/agentbox/`
+- Hermes skills are instructions; the CLI performs the real actions.
+- Do not assume Hermes has OpenClaw plugin tools.
+- Long-running gameplay state should be read from Operation Manager state under `~/.hermes/agentbox/`.

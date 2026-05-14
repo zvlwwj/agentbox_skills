@@ -95,17 +95,25 @@ This installer:
 - adds `agentbox_skills/hermes_skill` to `~/.hermes/config.yaml` under `skills.external_dirs`
 - initializes `~/.hermes/agentbox/`
 - creates `~/.hermes/bin/agentbox-hermes` as the Hermes CLI entrypoint
+- installs and starts the Agentbox Hermes local bridge as a macOS LaunchAgent
 
 Hermes runtime state is stored under:
 
 - `~/.hermes/agentbox/active_signer.json`
 - `~/.hermes/agentbox/active_role.json`
 - `~/.hermes/agentbox/background_runner_state.json`
+- `~/.hermes/agentbox/bridge.json`
 
 If you only want the skill mount and state directory, but do not want the CLI symlink:
 
 ```bash
 python3 agentbox_skills/scripts/install_hermes_skills.py --no-bin-link
+```
+
+If you want to skip the auto-managed local bridge during development:
+
+```bash
+python3 agentbox_skills/scripts/install_hermes_skills.py --skip-bridge-service
 ```
 
 ## Hermes CLI
@@ -128,6 +136,17 @@ agentbox-hermes action finish
 ```
 
 The CLI writes signer and active-role state to `~/.hermes/agentbox/`, not to OpenClaw.
+
+Hermes bridge management commands:
+
+```bash
+agentbox-hermes bridge status
+agentbox-hermes bridge token
+agentbox-hermes bridge restart
+agentbox-hermes bridge uninstall-service
+```
+
+`agentbox-hermes bridge start` remains available as a foreground debugging command. Normal installs should use the LaunchAgent installed by `install_hermes_skills.py`.
 
 ## Hermes Background Runs
 

@@ -322,10 +322,7 @@ export class AgentboxClient {
   }
 
   async getRegistrationFeeWei() {
-    if (typeof this.core.getRegistrationFee === "function") {
-      return BigInt(await this.core.getRegistrationFee());
-    }
-    return ethers.parseEther(this.settings.registrationValueEth);
+    return BigInt(await this.core.getRegistrationFee());
   }
 
   async getRoleIdentity(roleWallet) {

@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 
 import fs from "node:fs";
+import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import crypto from "node:crypto";
+import { spawn, spawnSync } from "node:child_process";
 
 import { hermesDataDir } from "../runtime/common.js";
 import { JSPlayerRuntime } from "../runtime/player-runtime.js";
@@ -12,6 +16,23 @@ const __dirname = path.dirname(__filename);
 const PLUGIN_ROOT = path.resolve(__dirname, "..");
 
 const HERMES_AGENTBOX_HOME = process.env.AGENTBOX_HERMES_HOME || hermesDataDir();
+const BRIDGE_PATH_PREFIX = "/plugins/agentbox-hermes/bridge";
+const DEFAULT_BRIDGE_HOST = "127.0.0.1";
+const DEFAULT_BRIDGE_PORT = 18889;
+const LAUNCH_AGENT_LABEL = "world.agentbox.hermes-bridge";
+const LAUNCH_AGENT_PATH = path.join(os.homedir(), "Library", "LaunchAgents", `${LAUNCH_AGENT_LABEL}.plist`);
+const BRIDGE_PID_PATH = path.join(HERMES_AGENTBOX_HOME, "bridge.pid");
+const BRIDGE_RUNTIME_PATH = path.join(HERMES_AGENTBOX_HOME, "bridge.runtime.json");
+const BRIDGE_LOG_PATH = path.join(HERMES_AGENTBOX_HOME, "bridge.log");
+const BRIDGE_ERR_LOG_PATH = path.join(HERMES_AGENTBOX_HOME, "bridge.err.log");
+const DEFAULT_ALLOWED_ORIGINS = [
+  "https://agentbox.world",
+  "https://www.agentbox.world",
+  "http://127.0.0.1:8090",
+  "http://localhost:8090",
+  "http://127.0.0.1:5173",
+  "http://localhost:5173",
+];
 
 function usage() {
   return `Usage:
@@ -65,6 +86,15 @@ function usage() {
   agentbox-hermes action trigger-mint
   agentbox-hermes action stabilize [--role ADDRESS]
   agentbox-hermes action transfer [--role ADDRESS] --amount N
+
+  agentbox-hermes bridge start
+  agentbox-hermes bridge stop
+  agentbox-hermes bridge restart
+  agentbox-hermes bridge install-service
+  agentbox-hermes bridge uninstall-service
+  agentbox-hermes bridge status
+  agentbox-hermes bridge token
+  agentbox-hermes bridge rotate-token
 
 Options:
   --pretty           Pretty-print JSON (default)
@@ -128,6 +158,397 @@ function optionalJson(flags, name) {
 
 function boolFlag(flags, name) {
   return Boolean(flags[name]);
+}
+
+function bridgeConfigPath() {
+  return path.join(HERMES_AGENTBOX_HOME, "bridge.json");
+}
+
+function randomBridgeToken() {
+  return crypto.randomBytes(24).toString("hex");
+}
+
+function readBridgeConfig() {
+  const configPath = bridgeConfigPath();
+  if (!fs.existsSync(configPath)) return null;
+  return JSON.parse(fs.readFileSync(configPath, "utf8"));
+}
+
+function createDefaultBridgeConfig() {
+  return {
+    enabled: true,
+    token: randomBridgeToken(),
+    host: DEFAULT_BRIDGE_HOST,
+    port: DEFAULT_BRIDGE_PORT,
+    allowedOrigins: DEFAULT_ALLOWED_ORIGINS,
+    defaultSessionKey: "agentbox-game-chat",
+    sseHeartbeatMs: 15000,
+    allowPrivateKeyExport: true,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function normalizeAllowedOrigins(value) {
+  const merged = new Set(DEFAULT_ALLOWED_ORIGINS);
+  if (Array.isArray(value)) {
+    for (const origin of value) {
+      if (typeof origin === "string" && origin.trim() && origin.trim() !== "*") merged.add(origin.trim());
+    }
+  }
+  return [...merged];
+}
+
+function writeBridgeConfig(config) {
+  fs.mkdirSync(HERMES_AGENTBOX_HOME, { recursive: true });
+  fs.writeFileSync(bridgeConfigPath(), `${JSON.stringify({ ...config, updatedAt: new Date().toISOString() }, null, 2)}\n`);
+}
+
+function ensureBridgeConfig() {
+  const current = readBridgeConfig();
+  const next = {
+    ...createDefaultBridgeConfig(),
+    ...(current ?? {}),
+    enabled: current?.enabled !== false,
+    token: typeof current?.token === "string" && current.token.trim() ? current.token.trim() : randomBridgeToken(),
+    host: typeof current?.host === "string" && current.host.trim() ? current.host.trim() : DEFAULT_BRIDGE_HOST,
+    port: Number.isFinite(Number(current?.port)) ? Number(current.port) : DEFAULT_BRIDGE_PORT,
+    allowedOrigins: normalizeAllowedOrigins(current?.allowedOrigins),
+    defaultSessionKey:
+      typeof current?.defaultSessionKey === "string" && current.defaultSessionKey.trim()
+        ? current.defaultSessionKey.trim()
+        : "agentbox-game-chat",
+    sseHeartbeatMs:
+      Number.isFinite(Number(current?.sseHeartbeatMs)) && Number(current.sseHeartbeatMs) >= 1000
+        ? Number(current.sseHeartbeatMs)
+        : 15000,
+    allowPrivateKeyExport: current?.allowPrivateKeyExport !== false,
+  };
+  writeBridgeConfig(next);
+  return next;
+}
+
+function normalizeBridgeConfig(current) {
+  if (!current) return null;
+  return {
+    ...createDefaultBridgeConfig(),
+    ...current,
+    enabled: current.enabled !== false,
+    token: typeof current.token === "string" && current.token.trim() ? current.token.trim() : "",
+    host: typeof current.host === "string" && current.host.trim() ? current.host.trim() : DEFAULT_BRIDGE_HOST,
+    port: Number.isFinite(Number(current.port)) ? Number(current.port) : DEFAULT_BRIDGE_PORT,
+    allowedOrigins: normalizeAllowedOrigins(current.allowedOrigins),
+    defaultSessionKey:
+      typeof current.defaultSessionKey === "string" && current.defaultSessionKey.trim()
+        ? current.defaultSessionKey.trim()
+        : "agentbox-game-chat",
+    sseHeartbeatMs:
+      Number.isFinite(Number(current.sseHeartbeatMs)) && Number(current.sseHeartbeatMs) >= 1000
+        ? Number(current.sseHeartbeatMs)
+        : 15000,
+    allowPrivateKeyExport: current.allowPrivateKeyExport !== false,
+  };
+}
+
+function bridgeBaseUrl(config) {
+  return `http://${config?.host ?? DEFAULT_BRIDGE_HOST}:${config?.port ?? DEFAULT_BRIDGE_PORT}${BRIDGE_PATH_PREFIX}`;
+}
+
+function readJsonFile(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function readPidFile() {
+  try {
+    if (!fs.existsSync(BRIDGE_PID_PATH)) return null;
+    const pid = Number(fs.readFileSync(BRIDGE_PID_PATH, "utf8").trim());
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+function isProcessAlive(pid) {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+function cleanupBridgeRuntimeFiles() {
+  for (const filePath of [BRIDGE_PID_PATH, BRIDGE_RUNTIME_PATH]) {
+    try {
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch {
+      // best-effort cleanup
+    }
+  }
+}
+
+function launchctlDomain() {
+  return `gui/${process.getuid?.() ?? ""}`;
+}
+
+function runLaunchctl(args) {
+  return spawnSync("launchctl", args, { encoding: "utf8" });
+}
+
+function isLaunchAgentInstalled() {
+  return fs.existsSync(LAUNCH_AGENT_PATH);
+}
+
+function isLaunchAgentLoaded() {
+  const result = runLaunchctl(["print", `${launchctlDomain()}/${LAUNCH_AGENT_LABEL}`]);
+  return result.status === 0;
+}
+
+async function probeBridge(config) {
+  const url = `${bridgeBaseUrl(config)}/status`;
+  return await new Promise((resolve) => {
+    const req = http.get(url, { timeout: 1500 }, (res) => {
+      let raw = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        raw += chunk;
+      });
+      res.on("end", () => {
+        try {
+          resolve({
+            ok: res.statusCode && res.statusCode >= 200 && res.statusCode < 300,
+            statusCode: res.statusCode ?? 0,
+            payload: raw ? JSON.parse(raw) : null,
+          });
+        } catch {
+          resolve({ ok: false, statusCode: res.statusCode ?? 0, payload: null });
+        }
+      });
+    });
+    req.on("timeout", () => {
+      req.destroy(new Error("probe_timeout"));
+    });
+    req.on("error", (error) => {
+      resolve({ ok: false, statusCode: 0, error: error.message });
+    });
+  });
+}
+
+async function waitForBridge(config, shouldRun) {
+  const deadline = Date.now() + 5000;
+  let lastProbe = null;
+  while (Date.now() < deadline) {
+    lastProbe = await probeBridge(config);
+    if (Boolean(lastProbe.ok) === shouldRun) return lastProbe;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return lastProbe;
+}
+
+async function collectBridgeStatus() {
+  const config = readBridgeConfig();
+  const normalized = normalizeBridgeConfig(config);
+  const pid = readPidFile();
+  const pidAlive = isProcessAlive(pid);
+  const runtime = readJsonFile(BRIDGE_RUNTIME_PATH);
+  const probe = normalized ? await probeBridge(normalized) : { ok: false, error: "not_configured" };
+  const stalePid = Boolean(pid && !pidAlive);
+  if (stalePid) cleanupBridgeRuntimeFiles();
+  return {
+    ok: true,
+    configured: Boolean(normalized),
+    running: Boolean(probe.ok),
+    pid,
+    pidAlive,
+    stalePid,
+    launchAgent: {
+      label: LAUNCH_AGENT_LABEL,
+      path: LAUNCH_AGENT_PATH,
+      installed: isLaunchAgentInstalled(),
+      loaded: isLaunchAgentLoaded(),
+    },
+    configPath: bridgeConfigPath(),
+    runtimePath: BRIDGE_RUNTIME_PATH,
+    host: normalized?.host ?? DEFAULT_BRIDGE_HOST,
+    port: normalized?.port ?? DEFAULT_BRIDGE_PORT,
+    hasToken: Boolean(normalized?.token),
+    baseUrl: normalized ? bridgeBaseUrl(normalized) : bridgeBaseUrl(createDefaultBridgeConfig()),
+    probe,
+    runtime,
+  };
+}
+
+async function stopBridgeProcess() {
+  const config = readBridgeConfig() ?? createDefaultBridgeConfig();
+  if (isLaunchAgentLoaded()) {
+    runLaunchctl(["bootout", launchctlDomain(), LAUNCH_AGENT_PATH]);
+  }
+  const pid = readPidFile();
+  if (pid && isProcessAlive(pid)) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      // process may already be gone
+    }
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline && isProcessAlive(pid)) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    if (isProcessAlive(pid)) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // ignore
+      }
+    }
+  }
+  await waitForBridge(config, false);
+  cleanupBridgeRuntimeFiles();
+}
+
+function xmlEscape(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+function launchAgentPlist() {
+  const cliScript = path.join(__dirname, "agentbox-hermes.js");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${xmlEscape(LAUNCH_AGENT_LABEL)}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${xmlEscape(process.execPath)}</string>
+    <string>${xmlEscape(cliScript)}</string>
+    <string>bridge</string>
+    <string>start</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>AGENTBOX_HERMES_HOME</key>
+    <string>${xmlEscape(HERMES_AGENTBOX_HOME)}</string>
+  </dict>
+  <key>WorkingDirectory</key>
+  <string>${xmlEscape(PLUGIN_ROOT)}</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>${xmlEscape(BRIDGE_LOG_PATH)}</string>
+  <key>StandardErrorPath</key>
+  <string>${xmlEscape(BRIDGE_ERR_LOG_PATH)}</string>
+</dict>
+</plist>
+`;
+}
+
+async function installBridgeService() {
+  const config = ensureBridgeConfig();
+  fs.mkdirSync(path.dirname(LAUNCH_AGENT_PATH), { recursive: true });
+  fs.mkdirSync(HERMES_AGENTBOX_HOME, { recursive: true });
+  fs.writeFileSync(LAUNCH_AGENT_PATH, launchAgentPlist());
+  if (isLaunchAgentLoaded()) {
+    runLaunchctl(["bootout", launchctlDomain(), LAUNCH_AGENT_PATH]);
+  }
+  const bootstrap = runLaunchctl(["bootstrap", launchctlDomain(), LAUNCH_AGENT_PATH]);
+  if (bootstrap.status !== 0) {
+    throw new Error((bootstrap.stderr || bootstrap.stdout || "launchctl bootstrap failed").trim());
+  }
+  runLaunchctl(["kickstart", "-k", `${launchctlDomain()}/${LAUNCH_AGENT_LABEL}`]);
+  await waitForBridge(config, true);
+}
+
+async function uninstallBridgeService() {
+  await stopBridgeProcess();
+  try {
+    if (fs.existsSync(LAUNCH_AGENT_PATH)) fs.unlinkSync(LAUNCH_AGENT_PATH);
+  } catch {
+    // best-effort cleanup
+  }
+}
+
+async function handleBridgeCommand(command, flags) {
+  if (command === "start") {
+    const bridgePath = path.join(__dirname, "agentbox-hermes-bridge.js");
+    await new Promise((resolve) => {
+      const proc = spawn(process.execPath, [bridgePath], {
+        cwd: PLUGIN_ROOT,
+        env: { ...process.env, AGENTBOX_HERMES_HOME: HERMES_AGENTBOX_HOME },
+        stdio: "inherit",
+      });
+      proc.on("exit", (code) => {
+        process.exitCode = code ?? 0;
+        resolve();
+      });
+      proc.on("error", (error) => {
+        process.exitCode = 2;
+        process.stderr.write(`${error?.message || String(error)}\n`);
+        resolve();
+      });
+    });
+    return true;
+  }
+  if (command === "stop") {
+    await stopBridgeProcess();
+    process.stdout.write(`${JSON.stringify(await collectBridgeStatus(), null, flags.compact ? 0 : 2)}\n`);
+    return true;
+  }
+  if (command === "restart") {
+    await stopBridgeProcess();
+    if (isLaunchAgentInstalled()) {
+      await installBridgeService();
+      process.stdout.write(`${JSON.stringify(await collectBridgeStatus(), null, flags.compact ? 0 : 2)}\n`);
+      return true;
+    }
+    const bridgePath = path.join(__dirname, "agentbox-hermes-bridge.js");
+    const proc = spawn(process.execPath, [bridgePath], {
+      cwd: PLUGIN_ROOT,
+      env: { ...process.env, AGENTBOX_HERMES_HOME: HERMES_AGENTBOX_HOME },
+      detached: true,
+      stdio: "ignore",
+    });
+    proc.unref();
+    await waitForBridge(ensureBridgeConfig(), true);
+    process.stdout.write(`${JSON.stringify(await collectBridgeStatus(), null, flags.compact ? 0 : 2)}\n`);
+    return true;
+  }
+  if (command === "install-service") {
+    await installBridgeService();
+    process.stdout.write(`${JSON.stringify(await collectBridgeStatus(), null, flags.compact ? 0 : 2)}\n`);
+    return true;
+  }
+  if (command === "uninstall-service") {
+    await uninstallBridgeService();
+    process.stdout.write(`${JSON.stringify(await collectBridgeStatus(), null, flags.compact ? 0 : 2)}\n`);
+    return true;
+  }
+  if (command === "status") {
+    process.stdout.write(`${JSON.stringify(await collectBridgeStatus(), null, flags.compact ? 0 : 2)}\n`);
+    return true;
+  }
+  if (command === "token" || command === "rotate-token") {
+    const current = normalizeBridgeConfig(readBridgeConfig()) ?? ensureBridgeConfig();
+    const token = command === "rotate-token" || !current.token ? randomBridgeToken() : current.token;
+    if (command === "rotate-token" || !current.token) {
+      writeBridgeConfig({ ...current, token });
+    }
+    process.stdout.write(flags.compact ? `${JSON.stringify({ token })}\n` : `${JSON.stringify({ token }, null, 2)}\n`);
+    return true;
+  }
+  return false;
 }
 
 function buildInvocation(positional, flags) {
@@ -337,6 +758,17 @@ async function main() {
   if (!positional.length || flags.help) {
     process.stdout.write(usage());
     process.exit(0);
+  }
+
+  if (positional[0] === "bridge") {
+    try {
+      const handled = await handleBridgeCommand(positional[1], flags);
+      if (!handled) throw new Error(`Unknown bridge command: ${positional[1] || "(missing)"}`);
+      process.exit(0);
+    } catch (error) {
+      process.stderr.write(`${JSON.stringify({ ok: false, errorMessage: error?.message || String(error) }, null, 2)}\n`);
+      process.exit(2);
+    }
   }
 
   fs.mkdirSync(HERMES_AGENTBOX_HOME, { recursive: true });

@@ -57,6 +57,10 @@ function normalizePriority(priority) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+function normalizeCustomStrategy(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function normalizeAction(action, index = 0) {
   if (!action || typeof action !== "object") {
     throw precheckError("INVALID_ACTION", "Each operation action must be an object", { index });
@@ -124,6 +128,8 @@ function makeEmptyState(role) {
     currentOperation: null,
     plannedOperations: [],
     completedOperations: [],
+    customStrategy: "",
+    customStrategyUpdatedAt: null,
     updatedAt: now,
   };
 }
@@ -140,6 +146,8 @@ function normalizeState(rawState, role) {
     currentOperation: state.currentOperation || null,
     plannedOperations: Array.isArray(state.plannedOperations) ? state.plannedOperations : [],
     completedOperations: Array.isArray(state.completedOperations) ? state.completedOperations : [],
+    customStrategy: normalizeCustomStrategy(state.customStrategy),
+    customStrategyUpdatedAt: state.customStrategyUpdatedAt || null,
     updatedAt: state.updatedAt || utcNowIso(),
   };
 }
@@ -177,19 +185,83 @@ function closeRemainingActions(operation, status) {
   }
 }
 
-function actionMatchesTool(action, toolName, params = {}) {
-  if (!action || !["pending", "in_progress"].includes(action.status)) return false;
-  if (action.toolName && action.toolName === toolName) return true;
-  if (action.type === toolName) return true;
-  const normalizedType = String(action.type || "").replaceAll("_", ".").toLowerCase();
-  const normalizedTool = String(toolName || "").replaceAll("_", ".").toLowerCase();
-  if (normalizedType && normalizedTool.endsWith(normalizedType)) return true;
-  if (!action.toolName && action.params && params) {
-    const actionRole = action.params.role ? String(action.params.role).toLowerCase() : null;
-    const paramsRole = params.role ? String(params.role).toLowerCase() : null;
-    if (actionRole && paramsRole && actionRole !== paramsRole) return false;
+function canonicalToolName(value) {
+  let normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replaceAll("_", ".")
+    .replace(/\.+/g, ".");
+  if (normalized.startsWith("agentbox.skills.")) normalized = normalized.slice("agentbox.skills.".length);
+  return normalized;
+}
+
+function canonicalActionNames(action) {
+  const names = new Set();
+  for (const value of [action?.toolName, action?.type]) {
+    const canonical = canonicalToolName(value);
+    if (canonical) names.add(canonical);
   }
-  return false;
+  const type = canonicalToolName(action?.type);
+  const shorthandAliases = {
+    move: ["move.instant"],
+    "move.instant": ["move.instant"],
+    teleport: ["teleport.start"],
+    gather: ["gather.start"],
+    craft: ["craft.start"],
+    learn: ["learn.start"],
+    "learn.start": ["learn.npc.start"],
+    "learn.npc.start": ["learn.start"],
+    attack: ["combat.start.attack"],
+    "start.attack": ["combat.start.attack"],
+    "combat.attack": ["combat.start.attack"],
+    "combat.start.attack": ["combat.attack"],
+    equip: ["equip.put.on"],
+    "equip.put.on": ["equip"],
+    "put.on": ["equip.put.on"],
+    unequip: ["equip.take.off"],
+    "take.off": ["equip.take.off"],
+    "equip.take.off": ["unequip"],
+    cancel: ["cancel.current.action"],
+    "cancel.current": ["cancel.current.action"],
+    "cancel.current.action": ["cancel.current.action"],
+    finish: ["finish.current.action"],
+    "finish.action": ["finish.current.action"],
+    "finish.current": ["finish.current.action"],
+    "finish.current.action": ["finish.current.action"],
+    stabilize: ["stabilize.balance"],
+    "stabilize.balance": ["stabilize.balance"],
+    "trigger.mint": ["trigger.mint"],
+  };
+  for (const alias of shorthandAliases[type] || []) names.add(alias);
+  return names;
+}
+
+function actionParamsCompatible(action, params = {}) {
+  const actionRole = action?.params?.role ? String(action.params.role).toLowerCase() : null;
+  const paramsRole = params?.role ? String(params.role).toLowerCase() : null;
+  if (actionRole && paramsRole && actionRole !== paramsRole) return false;
+  for (const key of ["x", "y", "amount", "recipeId", "npcId", "targetWallet"]) {
+    if (action?.params?.[key] === undefined || params?.[key] === undefined) continue;
+    if (String(action.params[key]).toLowerCase() !== String(params[key]).toLowerCase()) return false;
+  }
+  return true;
+}
+
+function actionMatchesTool(action, toolName, params = {}) {
+  if (!["pending", "in_progress"].includes(action?.status)) return false;
+  return actionShapeMatchesTool(action, toolName, params);
+}
+
+function actionShapeMatchesTool(action, toolName, params = {}) {
+  if (!action) return false;
+  if (!actionParamsCompatible(action, params)) return false;
+  const normalizedTool = canonicalToolName(toolName);
+  const actionNames = canonicalActionNames(action);
+  if (actionNames.has(normalizedTool)) return true;
+  for (const actionName of actionNames) {
+    if (normalizedTool.endsWith(`.${actionName}`)) return true;
+  }
+  return actionNames.size === 0;
 }
 
 function createAdHocOperation({ role, toolName, params, result, status }) {
@@ -254,6 +326,13 @@ export class OperationStore {
 
   readState(role) {
     return this.load(role);
+  }
+
+  updateStrategy(role, payload = {}) {
+    const state = this.load(role);
+    state.customStrategy = normalizeCustomStrategy(payload.customStrategy);
+    state.customStrategyUpdatedAt = utcNowIso();
+    return this.save(role, state);
   }
 
   addPlan(role, payload) {
@@ -381,7 +460,11 @@ export class OperationStore {
     if (!state.currentOperation) {
       return { state, operation: null, action: null, createdAdHoc: false };
     }
-    const action = (state.currentOperation.actions || []).find((item) => actionMatchesTool(item, toolName, params));
+    const action =
+      (state.currentOperation.actions || []).find((item) => actionMatchesTool(item, toolName, params)) ||
+      (state.currentOperation.actions || []).find(
+        (item) => item.status === "failed" && actionShapeMatchesTool(item, toolName, params)
+      );
     if (!action) {
       const adHoc = normalizeAction({
         type: toolName,
@@ -397,7 +480,10 @@ export class OperationStore {
       return { state, operation: state.currentOperation, action: adHoc, createdAdHoc: true };
     }
     action.status = "in_progress";
-    action.startedAt = action.startedAt || utcNowIso();
+    action.startedAt = utcNowIso();
+    action.finishedAt = null;
+    action.errorCode = null;
+    action.errorMessage = null;
     action.toolName = action.toolName || toolName;
     action.params = action.params && Object.keys(action.params).length > 0 ? action.params : cloneJson(params);
     appendEvent(action, { kind: "auto_started", toolName });

@@ -15,7 +15,7 @@ owner：<owner_address>
   
 ## 每轮固定流程
 
-1. 调用 `agentbox_operations_read_state` 读取当前 active role 的操作状态。
+1. 调用 `agentbox_operations_read_state` 读取当前 active role 的操作状态，并将其中的 `customStrategy` 作为本轮策略偏好。
 2. 读取最新角色和世界状态；必要时使用 `source = "chain"` 核对关键状态。
 3. 如果没有 `currentOperation`，但存在 `plannedOperations`，调用 `agentbox_operations_start_next`。
 4. 如果仍然没有可执行计划，则基于最新链上状态创建结构化计划，并调用 `agentbox_operations_add_plan` 写入。

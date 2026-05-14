@@ -67,9 +67,8 @@ description: 面向 OpenClaw agent 编排的 Agentbox 基础玩法工具集，�
 - `agentbox_skills_land_buy`：购买土地；要求角色站在目标地块、地块未被拥有、不是资源点、可靠 AGC 足够。
 - `agentbox_skills_land_set_contract`：设置地块合约；要求地块归该 `roleWallet` 所有，合约地址有效且未绑定其他地块。
 - `agentbox_skills_social_dm`：发送私信。
-- `agentbox_skills_social_global`：发送全局消息。
+- `agentbox_skills_social_global`：发送全局消息；要求至少有 `100` 个可靠 AGC，并消耗 `100` 个 AGC。
 - `agentbox_skills_cancel_current_action`：取消当前动作；支持 `Learning / Teaching / Crafting / Gathering / Teleporting / Attacking`，制作资源不退还。
 - `agentbox_skills_trigger_mint`：触发 mint；要求 `mintsCount < maxMintCount` 且链上 mint 间隔已到。
 - `agentbox_skills_stabilize_balance`：稳定化成熟的不稳定 AGC；不要求角色 `Idle`，可能只稳定化部分余额。
 - `agentbox_skills_transfer_agc_to_owner`：把可靠 AGC 从角色钱包转回 owner；只可转出 reliable AGC。
-

@@ -52,6 +52,10 @@ function resourceAmounts(me) {
   return out;
 }
 
+const AGC_DECIMALS = 18n;
+const GLOBAL_MESSAGE_COST_AGC = 100n;
+const GLOBAL_MESSAGE_COST_RAW = GLOBAL_MESSAGE_COST_AGC * (10n ** AGC_DECIMALS);
+
 function toFiniteNumber(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
@@ -90,6 +94,7 @@ function isAutoRecordedWriteTool(toolName) {
   return !toolName.includes(".read_") &&
     !toolName.includes(".check_") &&
     !toolName.includes(".summarize_") &&
+    !toolName.startsWith("agentbox.operations.") &&
     !toolName.startsWith("agentbox.skills.read_") &&
     !toolName.startsWith("agentbox.skills.check_") &&
     !toolName.startsWith("agentbox.skills.summarize_");
@@ -107,6 +112,7 @@ export function buildToolSpecs() {
     { name: "agentbox.roles.select_active", description: "Select the active role used when role is omitted.", parameters: obj({ roleWallet: ROLE, roleId: UINT }) },
     { name: "agentbox.roles.clear_active", description: "Clear the currently selected active role.", parameters: obj({}) },
     { name: "agentbox.operations.read_state", description: "Read the local operation manager state for the active role.", parameters: obj({ role: ROLE }) },
+    { name: "agentbox.operations.update_strategy", description: "Update the custom background strategy stored in the local operation manager state.", parameters: obj({ role: ROLE, customStrategy: STRING }) },
     { name: "agentbox.operations.add_plan", description: "Add a structured future operation plan for the active role.", parameters: obj({ role: ROLE, goal: STRING, actions: OPERATION_ACTION_LIST, priority: UINT, source: STRING }, ["goal", "actions"]) },
     { name: "agentbox.operations.start_next", description: "Move the highest-priority planned operation into currentOperation if no operation is currently running.", parameters: obj({ role: ROLE }) },
     { name: "agentbox.operations.next_action", description: "Read the next pending action from the current operation.", parameters: obj({ role: ROLE }) },
@@ -139,7 +145,7 @@ export function buildToolSpecs() {
     { name: "agentbox.skills.land.buy", description: "Buy the current target land.", parameters: obj({ role: ROLE, x: UINT, y: UINT }, ["role", "x", "y"]) },
     { name: "agentbox.skills.land.set_contract", description: "Set a contract address on a land you own.", parameters: obj({ role: ROLE, x: UINT, y: UINT, contractAddress: ADDRESS }, ["role", "x", "y", "contractAddress"]) },
     { name: "agentbox.skills.social.dm", description: "Send a direct message to another player.", parameters: obj({ role: ROLE, toWallet: TARGET_WALLET, message: STRING }, ["role", "toWallet", "message"]) },
-    { name: "agentbox.skills.social.global", description: "Send a global message.", parameters: obj({ role: ROLE, message: STRING }, ["role", "message"]) },
+    { name: "agentbox.skills.social.global", description: "Send a global message. Requires and consumes 100 reliable AGC.", parameters: obj({ role: ROLE, message: STRING }, ["role", "message"]) },
     { name: "agentbox.skills.cancel_current_action", description: "Cancel the current cancelable action.", parameters: obj({ role: ROLE }, ["role"]) },
     { name: "agentbox.skills.trigger_mint", description: "Trigger token mint when mint prerequisites are satisfied.", parameters: obj({}) },
     { name: "agentbox.skills.stabilize_balance", description: "Stabilize matured unreliable AGC for the role wallet.", parameters: obj({ role: ROLE }, ["role"]) },
@@ -251,6 +257,7 @@ export class JSPlayerRuntime {
       case "agentbox.roles.select_active": return this.selectActiveRole(payload);
       case "agentbox.roles.clear_active": return this.clearActiveRole();
       case "agentbox.operations.read_state": return this.operationReadState(payload);
+      case "agentbox.operations.update_strategy": return this.operationUpdateStrategy(payload);
       case "agentbox.operations.add_plan": return this.operationAddPlan(payload);
       case "agentbox.operations.start_next": return this.operationStartNext(payload);
       case "agentbox.operations.next_action": return this.operationNextAction(payload);
@@ -283,7 +290,7 @@ export class JSPlayerRuntime {
       case "agentbox.skills.land.buy": return this.coreWrite(toolName, "buyLand", [payload.role, Number(payload.x), Number(payload.y)], "Buy land transaction submitted", { roleWallet: payload.role, landXy: [Number(payload.x), Number(payload.y)] });
       case "agentbox.skills.land.set_contract": return this.coreWrite(toolName, "setLandContract", [payload.role, Number(payload.x), Number(payload.y), payload.contractAddress], "Set land contract transaction submitted", { roleWallet: payload.role, landXy: [Number(payload.x), Number(payload.y)] });
       case "agentbox.skills.social.dm": return this.coreWrite(toolName, "sendMessage", [payload.role, payload.toWallet, payload.message], "Direct message sent", { roleWallet: payload.role, targetWallet: payload.toWallet });
-      case "agentbox.skills.social.global": return this.coreWrite(toolName, "sendGlobalMessage", [payload.role, payload.message], "Global message sent", { roleWallet: payload.role });
+      case "agentbox.skills.social.global": return this.sendGlobalMessage(payload.role, payload.message);
       case "agentbox.skills.cancel_current_action": return this.cancelCurrentAction(payload.role);
       case "agentbox.skills.trigger_mint": return this.economyWrite(toolName, "triggerMint", [], "Mint trigger submitted");
       case "agentbox.skills.stabilize_balance": return this.stabilizeBalance(payload.role);
@@ -616,6 +623,14 @@ export class JSPlayerRuntime {
     return successResult("agentbox.operations.read_state", "Loaded operation state", {
       data: this.operations.readState(operationRole),
     });
+  }
+
+  async operationUpdateStrategy(payload) {
+    const operationRole = await this.resolveOperationRole(payload.role);
+    const state = this.operations.updateStrategy(operationRole, {
+      customStrategy: payload.customStrategy,
+    });
+    return successResult("agentbox.operations.update_strategy", "Updated operation custom strategy", { data: state });
   }
 
   async operationAddPlan(payload) {
@@ -1355,6 +1370,41 @@ export class JSPlayerRuntime {
     if (roleWallet) Object.assign(data, await this.validateOwnerOrController(roleWallet, wallet.address));
     const tx = await this.client.sendTransaction(this.client.economy, method, args, wallet);
     return successResult(action, summary, { data, txHash: tx.txHash, chainId: this.settings.chainId, blockNumber: tx.blockNumber });
+  }
+
+  async sendGlobalMessage(roleWallet, message) {
+    const { wallet } = this.requireActiveSigner();
+    const data = {
+      ...(await this.validateOwnerOrController(roleWallet, wallet.address)),
+    };
+    const balances = await this.client.getEconomyBalances(roleWallet);
+    const reliableBalance = BigInt(balances.reliableBalance || 0);
+    if (reliableBalance < GLOBAL_MESSAGE_COST_RAW) {
+      throw precheckError(
+        "INSUFFICIENT_RELIABLE_AGC_FOR_GLOBAL_MESSAGE",
+        "Role wallet does not have enough reliable AGC to send a global message",
+        {
+          requiredReliableAgc: GLOBAL_MESSAGE_COST_AGC.toString(),
+          requiredReliableBalance: GLOBAL_MESSAGE_COST_RAW.toString(),
+          reliableBalance: reliableBalance.toString(),
+          balances,
+        },
+      );
+    }
+    data.globalMessageCost = {
+      token: "AGC",
+      amount: GLOBAL_MESSAGE_COST_AGC.toString(),
+      rawAmount: GLOBAL_MESSAGE_COST_RAW.toString(),
+      paidFrom: "reliableBalance",
+    };
+    data.balancesBefore = balances;
+    const tx = await this.client.sendTransaction(this.client.core, "sendGlobalMessage", [roleWallet, message], wallet);
+    return successResult("agentbox.skills.social.global", "Global message sent", {
+      data,
+      txHash: tx.txHash,
+      chainId: this.settings.chainId,
+      blockNumber: tx.blockNumber,
+    });
   }
 
   async finishCurrentAction(roleWallet) {

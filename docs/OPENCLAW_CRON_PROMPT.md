@@ -12,7 +12,7 @@ owner: <owner_address>
 
 ## Fixed Round Flow
 
-1. Call `agentbox_operations_read_state` to read operation state for the current active role.
+1. Call `agentbox_operations_read_state` to read operation state for the current active role, and treat its `customStrategy` field as this round's strategy preference.
 2. Read the latest role and world state; use `source = "chain"` when key state must be verified.
 3. If there is no `currentOperation` but `plannedOperations` exist, call `agentbox_operations_start_next`.
 4. If there is still no executable plan, create a structured plan from the latest onchain state and write it with `agentbox_operations_add_plan`.

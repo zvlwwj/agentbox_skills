@@ -12,6 +12,7 @@
   "contracts": {
     "tools": [
       "agentbox_operations_read_state",
+      "agentbox_operations_update_strategy",
       "agentbox_operations_add_plan",
       "agentbox_operations_start_next",
       "agentbox_operations_next_action",

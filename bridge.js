@@ -7,6 +7,8 @@ const DEFAULT_BRIDGE_TOKEN_BYTES = 24;
 const DEFAULT_BRIDGE_SESSION_KEY = "session:agentbox-game-chat";
 const DEFAULT_SSE_HEARTBEAT_MS = 15000;
 const DEFAULT_PAIRING_TTL_MS = 2 * 60 * 1000;
+const DEFAULT_STREAM_TICKET_TTL_MS = 30 * 1000;
+const MAX_JSON_BODY_BYTES = 64 * 1024;
 const AGENTBOX_BACKGROUND_JOB_NAME = "agentbox-background-runner";
 const AGENTBOX_BACKGROUND_SESSION_TARGET = "session:agentbox-background-runner";
 const AGENTBOX_BACKGROUND_EVERY = "30m";
@@ -24,10 +26,6 @@ const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:8081",
   "http://127.0.0.1:8090",
   "http://localhost:8090",
-  "https://agentbox.world",
-  "https://www.agentbox.world",
-  "https://play.agentbox.world",
-  "https://app.agentbox.world",
 ];
 
 function randomBridgeToken() {
@@ -346,8 +344,16 @@ function writeHtml(res, statusCode, html, origin, extraHeaders = {}) {
 
 async function readJsonBody(req) {
   const chunks = [];
+  let size = 0;
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > MAX_JSON_BODY_BYTES) {
+      const error = new Error("json_body_too_large");
+      error.code = "JSON_BODY_TOO_LARGE";
+      throw error;
+    }
+    chunks.push(buffer);
   }
   const raw = Buffer.concat(chunks).toString("utf8").trim();
   if (!raw) return {};
@@ -516,6 +522,8 @@ function formatBridgeOperationState(result) {
     currentOperation: state.currentOperation ?? null,
     plannedOperations: Array.isArray(state.plannedOperations) ? state.plannedOperations : [],
     completedOperations: Array.isArray(state.completedOperations) ? state.completedOperations : [],
+    customStrategy: typeof state.customStrategy === "string" ? state.customStrategy : "",
+    customStrategyUpdatedAt: state.customStrategyUpdatedAt ?? null,
     updatedAt: state.updatedAt ?? null,
   };
 }
@@ -570,10 +578,8 @@ async function readActiveRoleForBackground(runtime) {
   };
 }
 
-async function buildBackgroundPrompt({ runtime, goal, customStrategy, language }) {
-  const normalizedGoal = sanitizeBackgroundText(goal, "");
-  const normalizedStrategy = sanitizeBackgroundText(customStrategy, "");
-  const resolvedLanguage = normalizeBackgroundLanguage(language, normalizedGoal, normalizedStrategy);
+async function buildBackgroundPrompt({ runtime, language }) {
+  const resolvedLanguage = normalizeBackgroundLanguage(language, "", "");
   const template = await fs.readFile(backgroundTemplateUrl(resolvedLanguage), "utf8");
   const { activeRole, ownerAddress } = await readActiveRoleForBackground(runtime);
   const roleWallet = activeRole?.roleWallet || "<rolewallet_address>";
@@ -582,22 +588,18 @@ async function buildBackgroundPrompt({ runtime, goal, customStrategy, language }
   const contextBlock =
     resolvedLanguage === "zh"
       ? [
-          "## 用户目标 / 自定义策略",
+          "## 自定义策略",
           "",
-          `- 当前游戏目标：${normalizedGoal || "未指定，按默认收益与成长策略推进"}`,
-          `- 自定义策略：${normalizedStrategy || "无"}`,
-          "- 该部分由 Agentbox 前端 Background Agent 面板写入；不要删除上方固定结构。",
+          "- 自定义策略保存在 Operation Manager 的 `customStrategy` 字段中。",
+          "- 每轮先读取 `agentbox_operations_read_state`，并根据其中的 `customStrategy` 调整计划。",
         ].join("\n")
       : [
-          "## User Goal / Custom Strategy",
+          "## Custom Strategy",
           "",
-          `- Current gameplay goal: ${normalizedGoal || "Not specified; continue with the default growth and profit strategy"}`,
-          `- Custom strategy: ${normalizedStrategy || "None"}`,
-          "- This section is written by the Agentbox frontend Background Agent panel; do not remove the fixed structure above.",
+          "- The custom strategy is stored in the Operation Manager `customStrategy` field.",
+          "- Read `agentbox_operations_read_state` first each round, and adjust plans according to `customStrategy`.",
         ].join("\n");
   const metadata = {
-    goal: normalizedGoal,
-    customStrategy: normalizedStrategy,
     language: resolvedLanguage,
     roleWallet,
     owner,
@@ -608,6 +610,13 @@ async function buildBackgroundPrompt({ runtime, goal, customStrategy, language }
     .replaceAll("<owner_address>", owner)
     .replaceAll("{{CURRENT_TIME}}", currentTime);
   return `${hydrated.trim()}\n\n${contextBlock}\n\n${BACKGROUND_METADATA_PREFIX} ${JSON.stringify(metadata)}`;
+}
+
+async function readBackgroundCustomStrategy(runtime) {
+  if (!runtime?.invoke) return null;
+  const result = await runtime.invoke("agentbox.operations.read_state", {});
+  const data = runtimeData(result);
+  return typeof data.customStrategy === "string" ? data.customStrategy : null;
 }
 
 function resolveCronService(api) {
@@ -728,7 +737,6 @@ function formatBackgroundJobStatus(job) {
       schedule: null,
       intervalMinutes: null,
       sessionKey: AGENTBOX_BACKGROUND_SESSION_TARGET,
-      goal: null,
       customStrategy: null,
       lastRunAt: null,
       lastRunStatus: null,
@@ -744,13 +752,18 @@ function formatBackgroundJobStatus(job) {
     schedule: backgroundScheduleLabel(job),
     intervalMinutes: backgroundIntervalMinutes(job),
     sessionKey: job.sessionTarget || AGENTBOX_BACKGROUND_SESSION_TARGET,
-    goal: typeof metadata.goal === "string" ? metadata.goal : null,
-    customStrategy: typeof metadata.customStrategy === "string" ? metadata.customStrategy : null,
+    customStrategy: null,
     language: metadata.language === "zh" || metadata.language === "en" ? metadata.language : null,
     lastRunAt: Number.isFinite(job.state?.lastRunAtMs) ? job.state.lastRunAtMs : null,
     lastRunStatus: job.state?.lastRunStatus || job.state?.lastStatus || null,
     runningAt: Number.isFinite(job.state?.runningAtMs) ? job.state.runningAtMs : null,
   };
+}
+
+async function formatBackgroundJobStatusWithOperations(runtime, job) {
+  const status = formatBackgroundJobStatus(job);
+  status.customStrategy = await readBackgroundCustomStrategy(runtime);
+  return status;
 }
 
 function desiredBackgroundJob({ api, message, enabled = true, intervalMinutes = 30 }) {
@@ -1050,6 +1063,50 @@ class OpenClawBridgePairingManager {
   }
 }
 
+class OpenClawBridgeStreamTicketManager {
+  constructor() {
+    this.tickets = new Map();
+  }
+
+  cleanup() {
+    const now = Date.now();
+    for (const [ticket, record] of this.tickets.entries()) {
+      if (record.expiresAt <= now || record.consumed) {
+        this.tickets.delete(ticket);
+      }
+    }
+  }
+
+  create(sessionKey) {
+    this.cleanup();
+    const ticket = crypto.randomBytes(24).toString("hex");
+    const now = Date.now();
+    this.tickets.set(ticket, {
+      sessionKey,
+      createdAt: now,
+      expiresAt: now + DEFAULT_STREAM_TICKET_TTL_MS,
+      consumed: false,
+    });
+    return {
+      ticket,
+      expiresAt: now + DEFAULT_STREAM_TICKET_TTL_MS,
+    };
+  }
+
+  consume(ticket) {
+    this.cleanup();
+    if (!ticket) return null;
+    const record = this.tickets.get(ticket);
+    if (!record || record.expiresAt <= Date.now() || record.consumed) {
+      this.tickets.delete(ticket);
+      return null;
+    }
+    record.consumed = true;
+    this.tickets.delete(ticket);
+    return record;
+  }
+}
+
 function renderPairingApproveHtml(request) {
   const originLabel = String(request.origin || "unknown-origin")
     .replaceAll("&", "&amp;")
@@ -1177,7 +1234,7 @@ function renderPairingApproveHtml(request) {
 </html>`;
 }
 
-function createBridgeHandler(api, hub, pairingManager, routeName, runtime) {
+function createBridgeHandler(api, hub, pairingManager, streamTicketManager, routeName, runtime) {
   return async (req, res) => {
     const bridgeConfig = readBridgeConfig(api);
     const runtimeSessionKey = resolveRuntimeSessionKey(api, bridgeConfig.defaultSessionKey);
@@ -1309,7 +1366,7 @@ function createBridgeHandler(api, hub, pairingManager, routeName, runtime) {
     }
 
     const token = getBearerToken(req);
-    if (!bridgeConfig.token || token !== bridgeConfig.token) {
+    if (routeName !== "stream" && (!bridgeConfig.token || token !== bridgeConfig.token)) {
       writeJson(res, 401, { ok: false, error: "invalid_bridge_token" }, origin);
       return true;
     }
@@ -1581,7 +1638,7 @@ function createBridgeHandler(api, hub, pairingManager, routeName, runtime) {
       }
       try {
         const job = findBackgroundJob(await listCronJobs(api));
-        writeJson(res, 200, formatBackgroundJobStatus(job), origin);
+        writeJson(res, 200, await formatBackgroundJobStatusWithOperations(runtime, job), origin);
       } catch (error) {
         writeJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) }, origin);
       }
@@ -1600,27 +1657,25 @@ function createBridgeHandler(api, hub, pairingManager, routeName, runtime) {
         writeJson(res, 400, { ok: false, error: "invalid_json" }, origin);
         return true;
       }
-      const goal = sanitizeBackgroundText(body.goal, "");
       const customStrategy = sanitizeBackgroundText(body.customStrategy, "");
       const existingJob = findBackgroundJob(await listCronJobs(api));
       const intervalMinutes = normalizeBackgroundIntervalMinutes(
         body.intervalMinutes,
         backgroundIntervalMinutes(existingJob) || 30
       );
-      if (routeName === "background-update-goal" && !existingJob) {
-        writeJson(res, 404, { ok: false, error: "background_job_missing" }, origin);
-        return true;
-      }
       try {
         const activeRoleState = await readActiveRoleForBackground(runtime);
         if (!activeRoleState.activeRole?.roleWallet) {
           writeJson(res, 400, { ok: false, error: "missing_active_role" }, origin);
           return true;
         }
+        await runtime.invoke("agentbox.operations.update_strategy", { customStrategy });
+        if (routeName === "background-update-goal" && !existingJob) {
+          writeJson(res, 200, await formatBackgroundJobStatusWithOperations(runtime, null), origin);
+          return true;
+        }
         const message = await buildBackgroundPrompt({
           runtime,
-          goal,
-          customStrategy,
           language: body.language,
         });
         const enabled = routeName === "background-start" ? true : existingJob.enabled !== false;
@@ -1634,7 +1689,7 @@ function createBridgeHandler(api, hub, pairingManager, routeName, runtime) {
           writeJson(
             res,
             200,
-            formatBackgroundJobStatus({
+            await formatBackgroundJobStatusWithOperations(runtime, {
               ...job,
               enabled: true,
               state: {
@@ -1646,7 +1701,7 @@ function createBridgeHandler(api, hub, pairingManager, routeName, runtime) {
           );
           return true;
         }
-        writeJson(res, 200, formatBackgroundJobStatus(job), origin);
+        writeJson(res, 200, await formatBackgroundJobStatusWithOperations(runtime, job), origin);
       } catch (error) {
         writeJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) }, origin);
       }
@@ -1665,63 +1720,7 @@ function createBridgeHandler(api, hub, pairingManager, routeName, runtime) {
           return true;
         }
         const nextJob = await setBackgroundJobEnabled(api, job.id, false);
-        writeJson(res, 200, formatBackgroundJobStatus(nextJob), origin);
-      } catch (error) {
-        writeJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) }, origin);
-      }
-      return true;
-    }
-
-    if (routeName === "background-run-now") {
-      if (req.method !== "POST") {
-        writeText(res, 405, "Method Not Allowed", origin);
-        return true;
-      }
-      try {
-        let body = {};
-        try {
-          body = await readJsonBody(req);
-        } catch {
-          // Empty body is allowed; run-now can reuse the existing job prompt.
-        }
-        let job = findBackgroundJob(await listCronJobs(api));
-        if (!job?.id) {
-          const activeRoleState = await readActiveRoleForBackground(runtime);
-          if (!activeRoleState.activeRole?.roleWallet) {
-            writeJson(res, 400, { ok: false, error: "missing_active_role" }, origin);
-            return true;
-          }
-          const message = await buildBackgroundPrompt({
-            runtime,
-            goal: sanitizeBackgroundText(body.goal, ""),
-            customStrategy: sanitizeBackgroundText(body.customStrategy, ""),
-            language: body.language,
-          });
-          job = await createOrUpdateBackgroundJob(api, message, {
-            enabled: true,
-            intervalMinutes: normalizeBackgroundIntervalMinutes(body.intervalMinutes, 30),
-          });
-        } else if (job.enabled === false) {
-          job = await setBackgroundJobEnabled(api, job.id, true);
-        }
-        if (!job?.id) {
-          writeJson(res, 500, { ok: false, error: "background_job_unavailable" }, origin);
-          return true;
-        }
-        await runBackgroundJobNow(api, job.id);
-        writeJson(
-          res,
-          200,
-          formatBackgroundJobStatus({
-            ...job,
-            enabled: true,
-            state: {
-              ...(job.state ?? {}),
-              runningAtMs: job.state?.runningAtMs ?? Date.now(),
-            },
-          }),
-          origin
-        );
+        writeJson(res, 200, await formatBackgroundJobStatusWithOperations(runtime, nextJob), origin);
       } catch (error) {
         writeJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) }, origin);
       }
@@ -1784,8 +1783,24 @@ function createBridgeHandler(api, hub, pairingManager, routeName, runtime) {
       return true;
     }
 
+    if (routeName === "stream-ticket") {
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method Not Allowed", origin);
+        return true;
+      }
+      const ticket = streamTicketManager.create(runtimeSessionKey);
+      writeJson(res, 200, { ok: true, sessionKey: runtimeSessionKey, ...ticket }, origin);
+      return true;
+    }
+
     if (routeName === "stream") {
-      const sessionKey = runtimeSessionKey;
+      const url = new URL(req.url ?? "/", "http://127.0.0.1");
+      const ticketRecord = streamTicketManager.consume(url.searchParams.get("ticket")?.trim() || "");
+      if (!ticketRecord) {
+        writeJson(res, 401, { ok: false, error: "invalid_stream_ticket" }, origin);
+        return true;
+      }
+      const sessionKey = ticketRecord.sessionKey;
       res.writeHead(200, {
         "Content-Type": "text/event-stream; charset=utf-8",
         "Cache-Control": "no-cache, no-transform",
@@ -1848,7 +1863,7 @@ function registerBridgeCli(api) {
   );
 }
 
-function registerBridgeRoutes(api, hub, pairingManager, runtime) {
+function registerBridgeRoutes(api, hub, pairingManager, streamTicketManager, runtime) {
   const routes = [
     { path: "/plugins/agentbox-skills/bridge/status", routeName: "status", auth: "plugin" },
     { path: "/plugins/agentbox-skills/bridge/pair/start", routeName: "pair-start", auth: "plugin" },
@@ -1872,9 +1887,9 @@ function registerBridgeRoutes(api, hub, pairingManager, runtime) {
     { path: "/plugins/agentbox-skills/bridge/background/status", routeName: "background-status", auth: "plugin" },
     { path: "/plugins/agentbox-skills/bridge/background/start", routeName: "background-start", auth: "plugin" },
     { path: "/plugins/agentbox-skills/bridge/background/stop", routeName: "background-stop", auth: "plugin" },
-    { path: "/plugins/agentbox-skills/bridge/background/run-now", routeName: "background-run-now", auth: "plugin" },
     { path: "/plugins/agentbox-skills/bridge/background/update-goal", routeName: "background-update-goal", auth: "plugin" },
     { path: "/plugins/agentbox-skills/bridge/send", routeName: "send", auth: "gateway" },
+    { path: "/plugins/agentbox-skills/bridge/stream-ticket", routeName: "stream-ticket", auth: "plugin" },
     { path: "/plugins/agentbox-skills/bridge/stream", routeName: "stream", auth: "plugin" },
   ];
   for (const route of routes) {
@@ -1884,7 +1899,7 @@ function registerBridgeRoutes(api, hub, pairingManager, runtime) {
       match: "exact",
       replaceExisting: true,
       ...(route.routeName === "send" ? { gatewayRuntimeScopeSurface: "trusted-operator" } : {}),
-      handler: createBridgeHandler(api, hub, pairingManager, route.routeName, runtime),
+      handler: createBridgeHandler(api, hub, pairingManager, streamTicketManager, route.routeName, runtime),
     });
   }
 }
@@ -1892,6 +1907,7 @@ function registerBridgeRoutes(api, hub, pairingManager, runtime) {
 function registerBridge(api, runtime) {
   const hub = new OpenClawBridgeHub(api);
   const pairingManager = new OpenClawBridgePairingManager(api);
+  const streamTicketManager = new OpenClawBridgeStreamTicketManager();
   api.registerService({
     id: "agentbox-bridge-sse",
     start: async () => {
@@ -1902,7 +1918,7 @@ function registerBridge(api, runtime) {
     },
   });
   registerBridgeCli(api);
-  registerBridgeRoutes(api, hub, pairingManager, runtime);
+  registerBridgeRoutes(api, hub, pairingManager, streamTicketManager, runtime);
 }
 
 export {

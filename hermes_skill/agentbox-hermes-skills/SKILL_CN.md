@@ -1,76 +1,33 @@
 ---
-
-## name: agentbox-hermes-skills
-description: 面向 Hermes Agent 的 Agentbox 基础玩法 skill。通过 Hermes 的 terminal/file/skills 工具，调用本地 agentbox-hermes CLI 完成 signer、多账号、状态读取、前置检查和链上动作执行。
+name: agentbox-hermes-skills
+description: 面向 Hermes Agent 的 Agentbox 基础玩法 skill，运行在 Base Sepolia 上。通过 Hermes terminal/file/skills 工具调用本地 agentbox-hermes CLI，完成状态读取、前置条件检查、Operation Manager 和链上动作执行。
 requires_toolsets: [terminal, file, skills]
 requires_tools: [terminal, read_file]
+---
 
 # Agentbox Hermes Skills
 
-## 目的
+## Skill 描述
 
-这个 skill 让 Hermes Agent 在 **不依赖 OpenClaw plugin/runtime** 的前提下，直接管理 Agentbox 游戏账号并执行链上动作。
+这个 skill 提供 Agentbox 的状态读取、前置条件检查、操作管理和链上动作执行能力。
 
 真正的执行入口是本地 CLI：
 
 - 首选：`agentbox-hermes`
-- 如果命令不在 PATH 中：`~/.hermes/bin/agentbox-hermes`
+- 兜底：`~/.hermes/bin/agentbox-hermes`
 
-所有命令默认返回 JSON。对用户解释时，优先使用语义名称，不直接复述裸 ID。
+所有命令默认返回 JSON。
 
-## 本地状态位置
+- 命令省略 `--role` 时，默认使用本地保存的 `active roleWallet`。
+- 面向用户反馈时优先使用语义名称，不直接复述裸 ID；常见 ID 映射见 `agentbox_skills/docs/AGENTBOX_ID_SEMANTICS_CN.md`。
 
-Hermes 版 Agentbox 状态固定保存在：
+## 命令参考
 
-- `~/.hermes/agentbox/active_signer.json`
-- `~/.hermes/agentbox/active_role.json`
-- `~/.hermes/agentbox/background_runner_state.json`
+### Operation Manager
 
-规则：
+后台任务会使用 Operation Manager 维护长期操作状态；具体每轮执行流程以 `agentbox_skills/docs/HERMES_CRON_PROMPT_CN.md` 为准。
 
-- 默认账号解析只使用 `active_role.json`
-- 没有 active role 时，不要自动猜最后一个账号，必须显式报错并先选择账号
-
-## 基础命令
-
-### Signer
-
-- `agentbox-hermes signer prepare`
-- `agentbox-hermes signer import --private-key <KEY>`
-- `agentbox-hermes signer export`
-- `agentbox-hermes signer read`
-- `agentbox-hermes registration confirm --profile-mode auto_generate`
-
-规则：
-
-- 如果本地已经存在 signer，默认不要重新创建或导入新的 signer
-- 当用户要求“创建新账号”时，如果已有 signer，默认复用这个 signer
-- 只有用户明确要求切换 owner 时，才允许替换 signer
-- 替换 signer 前，必须先提醒用户备份，并确认替换
-
-### 多账号
-
-- `agentbox-hermes roles list-owned`
-- `agentbox-hermes roles read-active`
-- `agentbox-hermes roles select-active --role-wallet <ROLE_WALLET>`
-- `agentbox-hermes roles clear-active`
-
-推荐流程：
-
-1. 先 `signer read`
-2. 再 `roles list-owned`
-3. 需要默认操作某个账号时，执行 `roles select-active`
-4. 之后省略 `--role` 的命令就会默认作用到 active role
-
-### 操作管理
-
-Operation Manager 按当前 `active roleWallet` 维护本地结构化操作文件，记录：
-
-- 已完成操作，以及每个 action 的执行时间、交易哈希和结果
-- 当前正在执行的操作，以及其中已完成和未完成的 action
-- 未来计划操作，以及每个操作需要的 action list
-
-命令：
+可用命令：
 
 - `agentbox-hermes operations read-state`
 - `agentbox-hermes operations add-plan --goal <GOAL> --actions-json '<JSON_ARRAY>'`
@@ -83,23 +40,14 @@ Operation Manager 按当前 `active roleWallet` 维护本地结构化操作文�
 - `agentbox-hermes operations reconcile`
 - `agentbox-hermes operations reconcile --apply`
 
-后台长期运行时，优先使用 Operation Manager，而不是在 prompt 或聊天历史中手工维护完整 action 记录：
+### 状态读取
 
-1. 先执行 `operations read-state`
-2. 如果没有当前操作但存在计划操作，执行 `operations start-next`
-3. 执行 `operations next-action` 获取下一步建议 action
-4. 调用对应的 `agentbox-hermes action ...` 写操作
-5. 写操作会由 runtime 自动记录为完成或失败
-6. 如果本地 operation state 与链上状态冲突，以链上状态为准，并执行 `operations reconcile`
-
-### 读取
-
-- `agentbox-hermes read role-snapshot`
-- `agentbox-hermes read world-static`
-- `agentbox-hermes read world-dynamic`
-- `agentbox-hermes read land --x <X> --y <Y>`
-- `agentbox-hermes read last-mint`
-- `agentbox-hermes read global-config`
+- `agentbox-hermes read role-snapshot`：读取角色完整快照；排查状态切换时可用 `--source chain`。
+- `agentbox-hermes read world-static`：读取地图配置、NPC、配方、装备和资源点目录。
+- `agentbox-hermes read world-dynamic`：读取当前区块、当前地块、附近角色/地块、地面 AGC 与最近 mint 信号。
+- `agentbox-hermes read land --x <X> --y <Y>` 或 `--land-id <ID>`：读取指定地块详情。坐标始终按 `(x, y)` 理解；不要把 `landId` 拆成坐标。
+- `agentbox-hermes read last-mint`：读取最近一次 mint 信息。
+- `agentbox-hermes read global-config`：读取地图、时序和经济配置。
 
 如需强制数据源，可加：
 
@@ -107,81 +55,46 @@ Operation Manager 按当前 `active roleWallet` 维护本地结构化操作文�
 - `--source chain`
 - `--source indexer`
 
-### 前置检查
+### 前置条件检查
 
-- `agentbox-hermes check gather --amount <N>`
-- `agentbox-hermes check learn --npc-id <ID>`
-- `agentbox-hermes check craft --recipe-id <ID>`
-- `agentbox-hermes check finishable`
-- `agentbox-hermes check trigger-mint`
-- `agentbox-hermes check stabilize`
+- `agentbox-hermes check finishable`：检查当前动作是否可完成。
+- `agentbox-hermes check gather --amount <N>`：检查采集条件；资源点最多允许 `10` 个角色同时采集。
+- `agentbox-hermes check learn --npc-id <ID>`：检查 NPC 学习条件。
+- `agentbox-hermes check craft --recipe-id <ID>`：检查制作条件。
+- `agentbox-hermes check trigger-mint`：检查 mint 条件；以链上 `lastMintBlock` 和 `mintsCount` 为准，地面 AGC 只作为策略信号。
+- `agentbox-hermes check stabilize`：检查是否存在值得尝试稳定化的不稳定 AGC。
 
-采集补充规则：链上每个资源点最多允许 `10` 个角色同时采集。`check gather` 会返回该限制说明；如果当前占用人数无法直接读取，`action gather` 仍可能因为资源点已满而回退。
+### 链上动作
 
-### 写操作
+通用权限：必须存在本地 signer；如果角色设置了 `controller`，signer 必须是 `controller`，否则必须是 `owner`。
 
-- `agentbox-hermes action move --x <X> --y <Y>`
-- `agentbox-hermes action teleport --x <X> --y <Y>`
-- `agentbox-hermes action learn --npc-id <ID>`
-- `agentbox-hermes action gather --amount <N>`
-- `agentbox-hermes action craft --recipe-id <ID>`
-- `agentbox-hermes action attack --target-wallet <ADDRESS>`
-- `agentbox-hermes action start-attack --target-wallet <ADDRESS>`
-- `agentbox-hermes action finish`
-- `agentbox-hermes action cancel`
-- `agentbox-hermes action equip --equipment-id <ID>`
-- `agentbox-hermes action unequip --slot <ID>`
-- `agentbox-hermes action trigger-mint`
-- `agentbox-hermes action stabilize`
-- `agentbox-hermes action transfer --amount <N>`
+- `agentbox-hermes action move --x <X> --y <Y>`：移动到目标坐标；要求 `Idle`、目标在地图内、距离不超过 `speed`。
+- `agentbox-hermes action teleport --x <X> --y <Y>`：开始传送；要求 `Idle`、目标在地图内且不是当前位置。
+- `agentbox-hermes action finish`：完成当前动作；要求 `finishable.canFinish = true`，支持 `Learning / Crafting / Gathering / Teleporting / Attacking`。
+- `agentbox-hermes action gather --amount <N>`：开始采集；要求 `Idle`、站在资源点、已学习对应技能、资源点未满。
+- `agentbox-hermes action learn --npc-id <ID>`：向 NPC 学习；要求 `Idle`、位于 NPC 精确坐标、NPC 空闲、技能未学会。
+- `agentbox-hermes action craft --recipe-id <ID>`：开始制作；要求 `Idle`、配方存在、技能已学、资源足够。
+- `agentbox-hermes action attack --target-wallet <ADDRESS>`：立即攻击；要求 `Idle`、目标存活且在攻击范围内。
+- `agentbox-hermes action start-attack --target-wallet <ADDRESS>`：开始持续攻击；之后用 `action finish` 结算伤害。
+- `agentbox-hermes action equip --equipment-id <ID>`：装备物品；要求 `Idle` 且物品归角色所有。
+- `agentbox-hermes action unequip --slot <ID>`：卸下装备；要求 `Idle` 且槽位已装备。
+- `agentbox-hermes action cancel`：取消当前动作；支持 `Learning / Teaching / Crafting / Gathering / Teleporting / Attacking`，制作资源不退还。
+- `agentbox-hermes action trigger-mint`：触发 mint；要求 `mintsCount < maxMintCount` 且链上 mint 间隔已到。
+- `agentbox-hermes action stabilize`：稳定化成熟的不稳定 AGC；不要求角色 `Idle`，可能只稳定化部分余额。
+- `agentbox-hermes action transfer --amount <N>`：把可靠 AGC 从角色钱包转回 owner；只可转出 reliable AGC。
 
 ## 用户反馈规则
 
-- 优先使用语义名称，例如：
-  - “铁匠”
-  - “护甲制作”
-  - “鞋子槽”
-- 只有在排障、核对配置、或用户明确要求时，才在括号里补 ID
+- 优先使用语义名称，例如“铁匠”、“护甲制作”、“鞋子槽”。
+- 只有在排障、核对配置、或用户明确要求时，才在括号里补 ID。
 
 例如：
 
 - 不说：`去 npcId=4 学 skillId=5`
 - 改说：`去铁匠学习弓箭制作`
 
-## 常用工作流
-
-### 1. 首次准备
-
-1. `agentbox-hermes signer prepare`
-2. `agentbox-hermes signer read`
-3. `agentbox-hermes roles list-owned`
-
-### 2. 切换默认账号
-
-1. `agentbox-hermes roles list-owned`
-2. `agentbox-hermes roles select-active --role-wallet <ROLE_WALLET>`
-3. `agentbox-hermes roles read-active`
-
-### 3. 创建新账号
-
-1. 先检查是否已有 signer：`agentbox-hermes signer read`
-2. 如果已有 signer，默认复用，不要重新 prepare/import
-3. 使用：
-  - `agentbox-hermes registration confirm --profile-mode auto_generate`
-  - 注册费用必须以链上当前 `getRegistrationFee()` 为准；当前阶梯为 `0.01/0.02/0.03/0.04/0.05 ETH`，第 `4000` 个角色后固定 `0.05 ETH`。
-4. 注册成功后，重新读取：
-  - `agentbox-hermes roles list-owned`
-  - `agentbox-hermes roles read-active`
-
-### 4. 安全写操作
-
-1. 先读状态
-2. 再做前置检查
-3. 最后执行写操作
-4. 写完后重新读取关键状态
-
 ## 重要边界
 
-- Hermes skill 只是说明书，真正动作通过 CLI 执行
-- 不要假设 Hermes 有 OpenClaw 的 plugin tools
-- 不要依赖历史对话保存运行状态，长期任务状态应写进 `~/.hermes/agentbox/`
+- Hermes skill 只是说明书，真正动作通过 CLI 执行。
+- 不要假设 Hermes 有 OpenClaw 的 plugin tools。
+- 长期游戏状态应从 `~/.hermes/agentbox/` 下的 Operation Manager 状态读取。

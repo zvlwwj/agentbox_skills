@@ -32,7 +32,6 @@ export function loadSettings(pluginRoot, overrides = {}) {
     txTimeoutSeconds: 120,
     estimateGasRetryLimit: "200000",
     minNativeBalanceEth: "0.012",
-    registrationValueEth: "0.01",
     autoMinOwnerBalanceEth: "0.0005",
   };
   return { ...settings, ...overrides, dataDir, signerStoreDir: path.join(dataDir, "signers") };

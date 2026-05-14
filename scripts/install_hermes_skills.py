@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 
@@ -27,6 +28,11 @@ def parse_args() -> argparse.Namespace:
         "--no-bin-link",
         action="store_true",
         help="Skip creating ~/.hermes/bin/agentbox-hermes.",
+    )
+    parser.add_argument(
+        "--skip-bridge-service",
+        action="store_true",
+        help="Skip installing the auto-managed Hermes local bridge LaunchAgent.",
     )
     return parser.parse_args()
 
@@ -99,18 +105,44 @@ def _ensure_cli_link() -> None:
     CLI_TARGET.symlink_to(CLI_SOURCE)
 
 
-def _print_validation_steps(bin_linked: bool) -> None:
+def _install_bridge_service() -> None:
+    print("Installing Agentbox Hermes bridge service...")
+    result = subprocess.run(
+        [str(CLI_TARGET), "bridge", "install-service"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.stdout.strip():
+        print(result.stdout.strip())
+    if result.returncode != 0:
+        if result.stderr.strip():
+            print(result.stderr.strip())
+        raise SystemExit(f"Failed to install Hermes bridge service with exit code {result.returncode}")
+
+
+def _print_validation_steps(bin_linked: bool, bridge_service_installed: bool) -> None:
     print(f"Hermes skill directory: {HERMES_SKILL_DIR.resolve()}")
     print(f"Hermes Agentbox state dir: {HERMES_AGENTBOX_HOME}")
     if bin_linked:
         print(f"CLI entry installed at: {CLI_TARGET}")
     else:
         print(f"CLI source available at: {CLI_SOURCE}")
+    if bridge_service_installed:
+        print("Hermes bridge service installed and managed by macOS LaunchAgent.")
+        print(f"Bridge base URL: http://127.0.0.1:18889/plugins/agentbox-hermes/bridge")
+        print(f"Bridge token command: {CLI_TARGET} bridge token")
+        print(f"Bridge status command: {CLI_TARGET} bridge status")
+    else:
+        print("Hermes bridge service was not installed.")
+        print(f"Debug bridge command: {CLI_TARGET if bin_linked else CLI_SOURCE} bridge start")
     print("Validation commands:")
     print("  1. Restart Hermes or open a fresh Hermes session.")
     print("  2. In Hermes, run skills_list() and confirm agentbox-hermes-skills / agentbox-hermes-cron-orchestrator appear.")
     if bin_linked:
         print(f"  3. Run: {CLI_TARGET} signer read")
+        print(f"  4. Run: {CLI_TARGET} bridge status")
     else:
         print(f"  3. Run: {CLI_SOURCE} signer read")
 
@@ -135,7 +167,16 @@ def main() -> None:
     else:
         print(f"Hermes external skill dir already present in {HERMES_CONFIG_PATH}")
 
-    _print_validation_steps(bin_linked=not args.no_bin_link)
+    bridge_service_installed = False
+    if args.skip_bridge_service:
+        print("Skipped Hermes bridge service installation.")
+    elif args.no_bin_link:
+        print("Skipped Hermes bridge service installation because --no-bin-link was set.")
+    else:
+        _install_bridge_service()
+        bridge_service_installed = True
+
+    _print_validation_steps(bin_linked=not args.no_bin_link, bridge_service_installed=bridge_service_installed)
 
 
 if __name__ == "__main__":
