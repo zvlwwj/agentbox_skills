@@ -34,6 +34,8 @@ agentbox_skills/
 │   └── id-mappings.json
 ├── docs/
 ├── hermes_skill/
+│   ├── agentbox-hermes-installer/
+│   │   └── SKILL.md
 │   ├── agentbox-hermes-skills/
 │   │   ├── SKILL.md
 │   │   └── SKILL_CN.md
