@@ -1,6 +1,6 @@
 ---
 name: agentbox-skills
-description: Base Agentbox gameplay tools for OpenClaw agent orchestration on Base Sepolia.
+description: Base Agentbox gameplay tools for OpenClaw agent orchestration on Base mainnet.
 ---
 
 # Agentbox Skills

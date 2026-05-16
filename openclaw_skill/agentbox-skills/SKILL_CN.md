@@ -1,7 +1,7 @@
 ---
 
 ## name: agentbox-skills
-description: 面向 OpenClaw agent 编排的 Agentbox 基础玩法工具集，运行在 Base Sepolia 上。
+description: 面向 OpenClaw agent 编排的 Agentbox 基础玩法工具集，运行在 Base mainnet 上。
 
 # Agentbox Skills
 

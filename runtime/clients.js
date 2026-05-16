@@ -229,6 +229,64 @@ export class ActiveRoleStore {
   }
 }
 
+export class OwnedRolesStore {
+  constructor(settings) {
+    this.settings = settings;
+    this.recordPath = path.join(settings.dataDir, "owned_roles.json");
+  }
+
+  normalizeRole(role, ownerAddress = null) {
+    if (!role?.roleWallet) return null;
+    return {
+      roleId: role.roleId == null ? null : Number(role.roleId),
+      roleWallet: role.roleWallet,
+      ownerAddress: role.ownerAddress || ownerAddress || null,
+    };
+  }
+
+  normalizeRecord(record) {
+    if (!record || typeof record !== "object") return null;
+    const ownerAddress = typeof record.ownerAddress === "string" ? record.ownerAddress : null;
+    const ownedRoles = Array.isArray(record.ownedRoles)
+      ? record.ownedRoles.map((role) => this.normalizeRole(role, ownerAddress)).filter(Boolean)
+      : [];
+    return {
+      ownerAddress,
+      ownedRoles,
+      updated_at: record.updated_at || utcNowIso(),
+    };
+  }
+
+  loadRecord() {
+    return this.normalizeRecord(readJsonFile(this.recordPath, null));
+  }
+
+  loadForOwner(ownerAddress) {
+    const record = this.loadRecord();
+    if (!record?.ownerAddress || !ownerAddress) return [];
+    if (record.ownerAddress.toLowerCase() !== ownerAddress.toLowerCase()) return [];
+    return record.ownedRoles;
+  }
+
+  saveOwnedRoles(ownerAddress, ownedRoles) {
+    const record = {
+      ownerAddress,
+      ownedRoles: Array.isArray(ownedRoles)
+        ? ownedRoles.map((role) => this.normalizeRole(role, ownerAddress)).filter(Boolean)
+        : [],
+      updated_at: utcNowIso(),
+    };
+    writeJsonFile(this.recordPath, record);
+    return this.loadRecord();
+  }
+
+  clear() {
+    try {
+      fs.unlinkSync(this.recordPath);
+    } catch {}
+  }
+}
+
 export class IndexerClient {
   constructor(baseUrl, timeoutMs = 10000) {
     this.baseUrl = baseUrl;
@@ -269,7 +327,6 @@ export class IndexerClient {
 
   getRoleByWallet(roleWallet) { return this.getJson(`/wallets/${roleWallet}/role`); }
   getGlobalConfig() { return this.getJson("/configs/global"); }
-  getIdMappings() { return this.getJson("/configs/id-mappings"); }
   getCoreContracts() { return this.getJson("/configs/core-contracts"); }
   getLandById(landId) { return this.getJson(`/lands/${landId}`); }
   getLandByCoordinate(x, y) { return this.getJson("/lands", { x_min: x, x_max: x, y_min: y, y_max: y, limit: 1, offset: 0 }); }

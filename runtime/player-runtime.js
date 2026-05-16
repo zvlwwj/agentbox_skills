@@ -38,9 +38,11 @@ import {
   successResult,
   txError,
 } from "./common.js";
-import { ActiveRoleStore, AgentboxClient, SignerStore } from "./clients.js";
+import { ActiveRoleStore, AgentboxClient, OwnedRolesStore, SignerStore } from "./clients.js";
 import { OperationStore } from "./operations.js";
 import { loadSettings } from "./settings.js";
+import fs from "node:fs";
+import path from "node:path";
 
 function learnedSkillIds(me) {
   return new Set((me.skills || []).filter((item) => item.learned).map((item) => Number(item.skillId || 0)));
@@ -55,10 +57,48 @@ function resourceAmounts(me) {
 const AGC_DECIMALS = 18n;
 const GLOBAL_MESSAGE_COST_AGC = 100n;
 const GLOBAL_MESSAGE_COST_RAW = GLOBAL_MESSAGE_COST_AGC * (10n ** AGC_DECIMALS);
+const RUNTIME_CONFIG_FILE = "runtime_config.json";
+
+function normalizeRpcUrl(value) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return "";
+  }
+}
+
+function readRuntimeConfig(dataDir) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(dataDir, RUNTIME_CONFIG_FILE), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function writeRuntimeConfig(dataDir, patch) {
+  fs.mkdirSync(dataDir, { recursive: true });
+  const current = readRuntimeConfig(dataDir);
+  const next = {
+    ...current,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  };
+  fs.writeFileSync(path.join(dataDir, RUNTIME_CONFIG_FILE), `${JSON.stringify(next, null, 2)}\n`);
+  return next;
+}
 
 function toFiniteNumber(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 const OPERATION_ACTION = {
@@ -169,6 +209,7 @@ export class JSPlayerRuntime {
     this.client = new AgentboxClient(this.settings);
     this.signers = new SignerStore(this.settings);
     this.activeRoles = new ActiveRoleStore(this.settings);
+    this.ownedRoles = new OwnedRolesStore(this.settings);
     this.operations = new OperationStore(this.settings);
     this.toolSpecs = buildToolSpecs();
     this.tools = new Map(this.toolSpecs.map((tool) => [tool.name, tool]));
@@ -181,6 +222,30 @@ export class JSPlayerRuntime {
       description: tool.description,
       parameters: tool.parameters,
     }));
+  }
+
+  getRpcConfig() {
+    const runtimeConfig = readRuntimeConfig(this.settings.dataDir);
+    return {
+      ok: true,
+      rpcUrl: this.settings.rpcUrl,
+      chainId: this.settings.chainId,
+      customRpcUrl: typeof runtimeConfig.rpcUrl === "string" && runtimeConfig.rpcUrl.trim() ? runtimeConfig.rpcUrl.trim() : null,
+    };
+  }
+
+  updateRpcConfig(rpcUrl) {
+    const normalizedRpcUrl = normalizeRpcUrl(rpcUrl);
+    if (!normalizedRpcUrl) {
+      throw precheckError("INVALID_RPC_URL", "RPC URL must be a valid http(s) URL");
+    }
+    writeRuntimeConfig(this.settings.dataDir, { rpcUrl: normalizedRpcUrl });
+    this.settings = {
+      ...this.settings,
+      rpcUrl: normalizedRpcUrl,
+    };
+    this.client = new AgentboxClient(this.settings);
+    return this.getRpcConfig();
   }
 
   async invoke(toolName, payload = {}) {
@@ -357,7 +422,19 @@ export class JSPlayerRuntime {
 
   async buildOwnedRolesPayload() {
     const { ownerAddress, ownedRoles } = await this.ownedRolesForActiveSigner();
-    const activeRoleRecord = this.activeRoles.loadRecord();
+    this.ownedRoles.saveOwnedRoles(ownerAddress, ownedRoles);
+    let activeRoleRecord = this.activeRoles.loadRecord();
+    const activeRoleStillOwned =
+      activeRoleRecord?.roleWallet &&
+      ownedRoles.some((item) => String(item.roleWallet).toLowerCase() === String(activeRoleRecord.roleWallet).toLowerCase());
+    if ((!activeRoleRecord?.roleWallet || !activeRoleStillOwned) && ownedRoles.length === 1) {
+      const selected = ownedRoles[0];
+      activeRoleRecord = this.activeRoles.setActiveRole({
+        roleId: selected.roleId,
+        roleWallet: selected.roleWallet,
+        ownerAddress,
+      });
+    }
     const activeRoleWallet = activeRoleRecord?.roleWallet?.toLowerCase() || null;
     return {
       ownerAddress,
@@ -524,19 +601,47 @@ export class JSPlayerRuntime {
   signerPrepare(label, force = false, backupConfirmed = false, confirmSignerReplacement = false) {
     const previous = this.ensureSignerOverwriteAllowed(force, backupConfirmed, confirmSignerReplacement);
     const record = this.signers.createSigner(label);
-    if (!previous || previous.address.toLowerCase() !== record.address.toLowerCase()) this.activeRoles.clear();
+    if (!previous || previous.address.toLowerCase() !== record.address.toLowerCase()) {
+      this.activeRoles.clear();
+      this.ownedRoles.clear();
+    }
     return successResult("agentbox.signer.prepare", "Local signer created", {
       data: { signerId: record.signer_id, address: record.address, label: record.label },
     });
   }
 
-  signerImport(privateKey, label, force = false, backupConfirmed = false, confirmSignerReplacement = false) {
+  async signerImport(privateKey, label, force = false, backupConfirmed = false, confirmSignerReplacement = false) {
     const importedWallet = new ethers.Wallet(privateKey);
     const previous = this.ensureSignerOverwriteAllowed(force, backupConfirmed, confirmSignerReplacement, importedWallet.address);
     const record = this.signers.importSigner(privateKey, label);
-    if (!previous || previous.address.toLowerCase() !== record.address.toLowerCase()) this.activeRoles.clear();
+    if (!previous || previous.address.toLowerCase() !== record.address.toLowerCase()) {
+      this.activeRoles.clear();
+      this.ownedRoles.clear();
+    }
+    const warnings = [];
+    let ownedRolesPayload = {
+      ownerAddress: record.address,
+      activeRole: this.activeRoles.loadRecord(),
+      ownedRolesCount: 0,
+      ownedRoles: [],
+    };
+    try {
+      ownedRolesPayload = await this.buildOwnedRolesPayload();
+    } catch (error) {
+      warnings.push({
+        field: "ownedRoles",
+        errorCode: error?.errorCode || error?.code || "OWNED_ROLES_SYNC_FAILED",
+        errorMessage: error?.message || String(error),
+      });
+    }
     return successResult("agentbox.signer.import", "Local signer imported", {
-      data: { signerId: record.signer_id, address: record.address, label: record.label },
+      data: {
+        signerId: record.signer_id,
+        address: record.address,
+        label: record.label,
+        ...ownedRolesPayload,
+        warnings,
+      },
     });
   }
 
@@ -1804,6 +1909,57 @@ export class JSPlayerRuntime {
     }
   }
 
+  findCreatedRole(ownedRolesBefore, ownedRolesAfter) {
+    const previousWallets = new Set(ownedRolesBefore.map((item) => String(item.roleWallet || "").toLowerCase()));
+    return (
+      ownedRolesAfter.find((item) => item?.roleWallet && !previousWallets.has(String(item.roleWallet).toLowerCase())) ||
+      (ownedRolesAfter.length > ownedRolesBefore.length ? ownedRolesAfter[ownedRolesAfter.length - 1] : null)
+    );
+  }
+
+  async waitForOwnedRoleCreation(ownerAddress, ownedRolesBefore) {
+    let latest = [];
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      latest = await this.client.listOwnedRoles(ownerAddress);
+      const created = this.findCreatedRole(ownedRolesBefore, latest);
+      if (created) return { ownedRolesAfter: latest, created };
+      if (attempt < 5) await sleep(750);
+    }
+    return { ownedRolesAfter: latest, created: null };
+  }
+
+  async recoverCreatedRoleFromReceipt(tx, ownerAddress) {
+    const receipt = tx?.receipt;
+    if (!receipt?.logs) return null;
+    const roleAddress = String(this.settings.roleAddress || "").toLowerCase();
+    let transferRoleId = null;
+    for (const log of receipt.logs) {
+      if (String(log.address || "").toLowerCase() !== roleAddress) continue;
+      let parsed = null;
+      try {
+        parsed = this.client.role.interface.parseLog(log);
+      } catch {
+        continue;
+      }
+      if (parsed?.name === "WalletCreated") {
+        return {
+          roleId: Number(parsed.args.roleId),
+          roleWallet: ethers.getAddress(parsed.args.wallet),
+        };
+      }
+      if (
+        parsed?.name === "Transfer" &&
+        String(parsed.args.from).toLowerCase() === ZERO_ADDRESS.toLowerCase() &&
+        String(parsed.args.to).toLowerCase() === String(ownerAddress).toLowerCase()
+      ) {
+        transferRoleId = Number(parsed.args.tokenId);
+      }
+    }
+    if (transferRoleId == null) return null;
+    const roleWallet = await this.client.role.wallets(transferRoleId);
+    return { roleId: transferRoleId, roleWallet };
+  }
+
   async registrationConfirm({ profileMode, nickname, gender }) {
     await this.validateRuntime();
     const { wallet } = this.requireActiveSigner();
@@ -1867,15 +2023,30 @@ export class JSPlayerRuntime {
       });
     }
     const tx = await this.client.sendTransaction(this.client.core, resolved.nickname ? "createCharacter" : "createCharacter", resolved.nickname ? [resolved.nickname, resolved.gender] : [], wallet, registrationFeeWei);
-    const ownedRolesAfter = await this.client.listOwnedRoles(wallet.address);
-    const previousWallets = new Set(ownedRolesBefore.map((item) => item.roleWallet.toLowerCase()));
-    const created = ownedRolesAfter.find((item) => !previousWallets.has(item.roleWallet.toLowerCase())) || ownedRolesAfter[ownedRolesAfter.length - 1];
-    if (!created) throw txError("ROLE_CREATE_PARSE", "Unable to recover role creation from chain");
+    let { ownedRolesAfter, created } = await this.waitForOwnedRoleCreation(wallet.address, ownedRolesBefore);
+    if (!created) {
+      created = await this.recoverCreatedRoleFromReceipt(tx, wallet.address);
+      if (created) {
+        ownedRolesAfter = await this.client.listOwnedRoles(wallet.address);
+        if (!ownedRolesAfter.some((item) => String(item.roleWallet).toLowerCase() === String(created.roleWallet).toLowerCase())) {
+          ownedRolesAfter = [...ownedRolesAfter, created];
+        }
+      }
+    }
+    if (!created) {
+      throw txError("ROLE_CREATE_PARSE", "Unable to recover role creation from chain", {
+        txHash: tx.txHash,
+        blockNumber: tx.blockNumber,
+        ownedRolesBeforeCount: ownedRolesBefore.length,
+        ownedRolesAfterCount: ownedRolesAfter.length,
+      });
+    }
     const nextActiveRole = this.activeRoles.setActiveRole({
       roleId: created.roleId,
       roleWallet: created.roleWallet,
       ownerAddress: wallet.address,
     });
+    this.ownedRoles.saveOwnedRoles(wallet.address, ownedRolesAfter);
     const activeSigner = await this.activeSignerSummary();
     return successResult("agentbox.registration.confirm", "Registration confirmed with the active signer", {
       data: {

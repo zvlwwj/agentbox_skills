@@ -315,25 +315,28 @@ function formatBridgeActiveRole(runtimeResult) {
   };
 }
 
-function formatBridgeAccountStatus(signerResult, activeRoleResult) {
-  const signerData = runtimeData(signerResult);
-  const activeData = runtimeData(activeRoleResult);
-  const signer = signerData.signer && typeof signerData.signer === "object" ? signerData.signer : null;
+function formatBridgeLocalAccountStatus(runtime) {
+  const signerRecord = runtime?.signers?.loadRecord?.() || null;
+  const activeRole = runtime?.activeRoles?.loadRecord?.() || null;
+  const ownedRoles = signerRecord?.address ? runtime?.ownedRoles?.loadForOwner?.(signerRecord.address) || [] : [];
+  const activeRoleOwnedBySigner = Boolean(
+    signerRecord?.address &&
+    activeRole?.ownerAddress &&
+    String(signerRecord.address).toLowerCase() === String(activeRole.ownerAddress).toLowerCase()
+  );
   return {
     ok: true,
     signer: {
-      exists: Boolean(signerData.hasSigner && signer),
-      signerId: signer?.signerId ?? null,
-      ownerAddress: signer?.address ?? null,
-      label: signer?.label ?? null,
-      balanceEth: signer?.balanceEth ?? null,
+      exists: Boolean(signerRecord?.address),
+      signerId: signerRecord?.signer_id ?? null,
+      ownerAddress: signerRecord?.address ?? null,
+      label: signerRecord?.label ?? null,
     },
-    activeRole: activeData.activeRole ?? signerData.activeRole ?? null,
-    hasActiveRole: Boolean(activeData.hasActiveRole ?? signerData.hasActiveRole),
-    activeRoleOwnedBySigner: Boolean(activeData.isOwnedByActiveSigner ?? signerData.activeRoleOwnedBySigner),
-    ownedRolesCount: Number(signerData.ownedRolesCount ?? activeData.ownedRolesCount ?? 0),
-    registrationFeeEth: signerData.registrationFeeEth ?? null,
-    warning: formatBridgeWarning(activeData.warning),
+    activeRole: activeRole?.roleWallet ? activeRole : null,
+    hasActiveRole: Boolean(activeRole?.roleWallet),
+    activeRoleOwnedBySigner,
+    ownedRolesCount: ownedRoles.length,
+    warning: null,
   };
 }
 
@@ -347,31 +350,30 @@ function formatBridgeSigner(result, { includePrivateKey = false } = {}) {
       signerId: signer?.signerId ?? null,
       ownerAddress: signer?.address ?? null,
       label: signer?.label ?? null,
-      balanceEth: signer?.balanceEth ?? null,
       hasPrivateKey: Boolean(signer?.hasPrivateKey || signer?.privateKey),
       ...(includePrivateKey && signer?.privateKey ? { privateKey: signer.privateKey } : {}),
     },
     ownedRolesCount: Number(data.ownedRolesCount ?? 0),
     activeRole: data.activeRole ?? null,
+    ownedRoles: Array.isArray(data.ownedRoles) ? data.ownedRoles : [],
+    warnings: Array.isArray(data.warnings) ? data.warnings : [],
   };
 }
 
-function formatBridgeRoles(result) {
-  const data = runtimeData(result);
-  const activeRoleWallet = data.activeRole?.roleWallet?.toLowerCase?.() || "";
-  const ownedRoles = Array.isArray(data.ownedRoles)
-    ? data.ownedRoles.map((role) => ({
-        roleId: role.roleId ?? null,
-        roleWallet: role.roleWallet ?? "",
-        ownerAddress: role.ownerAddress ?? data.ownerAddress ?? "",
-        isActive: Boolean(role.isActive || (activeRoleWallet && role.roleWallet?.toLowerCase?.() === activeRoleWallet)),
-      }))
-    : [];
+function formatBridgeLocalRoles(runtime) {
+  const signerRecord = runtime?.signers?.loadRecord?.() || null;
+  const activeRole = runtime?.activeRoles?.loadRecord?.() || null;
+  const activeRoleWallet = activeRole?.roleWallet?.toLowerCase() || null;
+  const cachedRoles = signerRecord?.address ? runtime?.ownedRoles?.loadForOwner?.(signerRecord.address) || [] : [];
+  const ownedRoles = cachedRoles.map((role) => ({
+    ...role,
+    isActive: Boolean(activeRoleWallet && role.roleWallet.toLowerCase() === activeRoleWallet),
+  }));
   return {
     ok: true,
-    ownerAddress: data.ownerAddress ?? null,
-    activeRole: data.activeRole ?? null,
-    ownedRolesCount: Number(data.ownedRolesCount ?? ownedRoles.length),
+    ownerAddress: signerRecord?.address ?? activeRole?.ownerAddress ?? null,
+    activeRole: activeRole?.roleWallet ? activeRole : null,
+    ownedRolesCount: ownedRoles.length,
     ownedRoles,
   };
 }
@@ -602,8 +604,6 @@ async function createOrUpdateBackgroundJob(runtime, body = {}) {
       "0",
       "--skill",
       "agentbox-hermes-skills",
-      "--skill",
-      "agentbox-hermes-cron-orchestrator",
     ]);
     if (!editResult.ok) throw new Error(editResult.stderr || editResult.stdout || "Hermes cron edit failed");
     const resumeResult = await spawnCommand(HERMES_CLI, ["cron", "resume", existing.id]);
@@ -623,8 +623,6 @@ async function createOrUpdateBackgroundJob(runtime, body = {}) {
     "0",
     "--skill",
     "agentbox-hermes-skills",
-    "--skill",
-    "agentbox-hermes-cron-orchestrator",
   ]);
   if (!createResult.ok) throw new Error(createResult.stderr || createResult.stdout || "Hermes cron create failed");
   return findBackgroundJob();
@@ -766,6 +764,28 @@ function renderPairingApproveHtml(request) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Approve Hermes Agentbox Bridge</title><style>body{font:16px system-ui;background:#111b24;color:#f5f7fa;display:grid;place-items:center;min-height:100vh;margin:0}.card{max-width:520px;padding:24px;border:1px solid #334;border-radius:18px;background:#172532}button{width:100%;min-height:48px;border:0;border-radius:12px;background:#ffd36a;font-weight:700}</style></head><body><main class="card"><h1>Approve local Hermes pairing</h1><p>Origin: ${String(request.origin).replaceAll("<", "&lt;")}</p><button id="approve">Approve this browser</button><p id="status"></p></main><script>const pairingId=${JSON.stringify(request.pairingId)};const approveSecret=${JSON.stringify(request.approveSecret)};document.getElementById("approve").onclick=async()=>{const s=document.getElementById("status");s.textContent="Approving…";const r=await fetch("${DEFAULT_BRIDGE_PATH_PREFIX}/pair/approve",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pairingId,approveSecret})});s.textContent=r.ok?"Approved. You can close this window.":"Approval failed.";if(r.ok) window.close();};</script></body></html>`;
 }
 
+async function ensureLocalSignerForBridge(runtime) {
+  try {
+    const existing = runtime?.signers?.loadRecord?.();
+    if (existing) return;
+    const result = await runtime.invoke("agentbox.signer.prepare", {
+      label: "local-gameplay-signer",
+    });
+    if (result?.ok) {
+      const signer = result?.data?.data || result?.details?.data || result?.data || {};
+      console.log(`Agentbox Hermes bridge created local gameplay signer${signer.address ? ` ${signer.address}` : ""}`);
+      return;
+    }
+    console.warn(`Agentbox Hermes bridge failed to create local gameplay signer: ${JSON.stringify(result)}`);
+  } catch (error) {
+    console.warn(
+      `Agentbox Hermes bridge failed to ensure local gameplay signer: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+}
+
 async function main() {
   const config = await ensureConfig();
   const runtime = new JSPlayerRuntime(PLUGIN_ROOT, {
@@ -773,6 +793,7 @@ async function main() {
       dataDir: HERMES_AGENTBOX_HOME,
     },
   });
+  await ensureLocalSignerForBridge(runtime);
   const configProvider = async () => loadConfig();
   const pairingManager = new PairingManager(configProvider);
   const ticketManager = new StreamTicketManager();
@@ -865,6 +886,33 @@ async function main() {
         writeJson(res, 200, { ok: true, sessionKey: latestConfig.defaultSessionKey, bridgeEnabled: latestConfig.enabled }, origin, latestConfig);
         return;
       }
+      if (route === "/config/rpc") {
+        if (req.method === "GET") {
+          writeJson(res, 200, runtime.getRpcConfig(), origin, latestConfig);
+          return;
+        }
+        if (req.method !== "POST") {
+          writeText(res, 405, "Method Not Allowed", origin, latestConfig);
+          return;
+        }
+        const body = await readJsonBody(req);
+        try {
+          writeJson(res, 200, runtime.updateRpcConfig(body.rpcUrl), origin, latestConfig);
+        } catch (error) {
+          writeJson(
+            res,
+            400,
+            {
+              ok: false,
+              error: error?.errorCode || "invalid_rpc_url",
+              message: error instanceof Error ? error.message : String(error),
+            },
+            origin,
+            latestConfig
+          );
+        }
+        return;
+      }
       if (route === "/session/ensure") {
         writeJson(res, 200, { ok: true, sessionKey: latestConfig.defaultSessionKey, exists: true }, origin, latestConfig);
         return;
@@ -875,16 +923,35 @@ async function main() {
         return;
       }
       if (route === "/game/active-role") {
-        const result = await runtime.invoke("agentbox.roles.read_active", {});
-        const payload = formatBridgeActiveRole(result);
-        writeJson(res, 200, payload, origin, latestConfig);
+        const activeRole = runtime?.activeRoles?.loadRecord?.() || null;
+        writeJson(
+          res,
+          200,
+          {
+            ok: true,
+            hasActiveRole: Boolean(activeRole?.roleWallet),
+            isOwnedByActiveSigner: Boolean(activeRole?.roleWallet),
+            warning: null,
+            activeRole: activeRole?.roleWallet
+              ? {
+                  roleId: activeRole.roleId ?? null,
+                  roleWallet: activeRole.roleWallet,
+                  ownerAddress: activeRole.ownerAddress ?? "",
+                  x: null,
+                  y: null,
+                  state: null,
+                  stateName: "",
+                  nickname: "",
+                }
+              : null,
+          },
+          origin,
+          latestConfig
+        );
         return;
       }
       if (route === "/account/status") {
-        const signerResult = await runtime.invoke("agentbox.signer.read", {});
-        let activeRoleResult = { ok: true, data: { activeRole: null, hasActiveRole: false, ownedRolesCount: 0 } };
-        if (runtimeData(signerResult).hasSigner) activeRoleResult = await runtime.invoke("agentbox.roles.read_active", {});
-        writeJson(res, 200, formatBridgeAccountStatus(signerResult, activeRoleResult), origin, latestConfig);
+        writeJson(res, 200, formatBridgeLocalAccountStatus(runtime), origin, latestConfig);
         return;
       }
       if (route === "/account/signer/prepare") {
@@ -928,7 +995,7 @@ async function main() {
         return;
       }
       if (route === "/account/roles") {
-        writeRuntimeResult(res, origin, latestConfig, await runtime.invoke("agentbox.roles.list_owned", {}), formatBridgeRoles);
+        writeJson(res, 200, formatBridgeLocalRoles(runtime), origin, latestConfig);
         return;
       }
       if (route === "/account/roles/active") {
@@ -1013,7 +1080,7 @@ async function main() {
             "--source",
             "agentbox-game",
             "--skills",
-            "agentbox-hermes-skills,agentbox-hermes-cron-orchestrator",
+            "agentbox-hermes-skills",
           ]);
           const assistantText = normalizeHermesChatOutput(result.stdout) || result.stderr.trim() || "Hermes did not return a response.";
           await hub.broadcastMessage({

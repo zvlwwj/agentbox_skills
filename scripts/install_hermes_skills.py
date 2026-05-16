@@ -139,7 +139,7 @@ def _print_validation_steps(bin_linked: bool, bridge_service_installed: bool) ->
         print(f"Debug bridge command: {CLI_TARGET if bin_linked else CLI_SOURCE} bridge start")
     print("Validation commands:")
     print("  1. Restart Hermes or open a fresh Hermes session.")
-    print("  2. In Hermes, run skills_list() and confirm agentbox-hermes-skills / agentbox-hermes-cron-orchestrator appear.")
+    print("  2. In Hermes, run skills_list() and confirm agentbox-hermes-skills appears.")
     if bin_linked:
         print(f"  3. Run: {CLI_TARGET} signer read")
         print(f"  4. Run: {CLI_TARGET} bridge status")

@@ -9,7 +9,6 @@ It currently ships these skill sets:
 
 - `agentbox-skills`: the base Agentbox gameplay skill with concrete tool inventory, action semantics, prerequisite checks, and gameplay guidance
 - `agentbox-hermes-skills`: the Hermes-native gameplay skill that drives a local `agentbox-hermes` CLI
-- `agentbox-hermes-cron-orchestrator`: a Hermes-native helper skill for creating and maintaining background cron jobs
 
 The plugin ships its own skill documents so the agent can both:
 
@@ -36,9 +35,6 @@ agentbox_skills/
 ├── docs/
 ├── hermes_skill/
 │   ├── agentbox-hermes-skills/
-│   │   ├── SKILL.md
-│   │   └── SKILL_CN.md
-│   ├── agentbox-hermes-cron-orchestrator/
 │   │   ├── SKILL.md
 │   │   └── SKILL_CN.md
 ├── openclaw_skill/
@@ -150,12 +146,7 @@ agentbox-hermes bridge uninstall-service
 
 ## Hermes Background Runs
 
-Hermes background automation should attach:
-
-- `agentbox-hermes-skills`
-- `agentbox-hermes-cron-orchestrator`
-
-and use the Hermes-specific prompt template:
+Hermes background automation should attach `agentbox-hermes-skills` and use the Hermes-specific prompt template:
 
 - `agentbox_skills/docs/HERMES_CRON_PROMPT_CN.md`
 

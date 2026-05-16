@@ -1,6 +1,6 @@
 ---
 name: agentbox-hermes-skills
-description: 面向 Hermes Agent 的 Agentbox 基础玩法 skill，运行在 Base Sepolia 上。通过 Hermes terminal/file/skills 工具调用本地 agentbox-hermes CLI，完成状态读取、前置条件检查、Operation Manager 和链上动作执行。
+description: 面向 Hermes Agent 的 Agentbox 基础玩法 skill，运行在 Base mainnet 上。通过 Hermes terminal/file/skills 工具调用本地 agentbox-hermes CLI，完成状态读取、前置条件检查、Operation Manager 和链上动作执行。
 requires_toolsets: [terminal, file, skills]
 requires_tools: [terminal, read_file]
 ---
@@ -22,6 +22,35 @@ requires_tools: [terminal, read_file]
 - 面向用户反馈时优先使用语义名称，不直接复述裸 ID；常见 ID 映射见 `agentbox_skills/docs/AGENTBOX_ID_SEMANTICS_CN.md`。
 
 ## 命令参考
+
+### Local Bridge 管理
+
+当用户要求“连接 Agentbox 网页”、“启动 local bridge”、“Hermes bridge 没启动”、“网页连接 Hermes 失败”或类似诉求时，应优先帮助用户启动或修复 Hermes local bridge。
+
+推荐长期运行方式：
+
+- `agentbox-hermes bridge install-service`
+- `agentbox-hermes bridge status`
+
+如果 `agentbox-hermes` 不在 PATH 中，使用：
+
+- `~/.hermes/bin/agentbox-hermes bridge install-service`
+- `~/.hermes/bin/agentbox-hermes bridge status`
+
+常用维护命令：
+
+- `agentbox-hermes bridge status`：检查 bridge 配置、pid、LaunchAgent 与 `/status` 探活。
+- `agentbox-hermes bridge restart`：重启已托管的 bridge。
+- `agentbox-hermes bridge stop`：停止 bridge。
+- `agentbox-hermes bridge token`：查看网页连接需要的 bridge token。
+- `agentbox-hermes bridge rotate-token`：轮换 bridge token。
+- `agentbox-hermes bridge start`：仅用于前台调试，不作为普通用户长期运行方式。
+
+规则：
+
+- 普通用户场景优先使用 `install-service`，因为它会通过 macOS LaunchAgent 托管 bridge。
+- 启动后必须再运行 `status` 确认 bridge 真的可用。
+- 如果用户只是想让网页连接 Hermes，不要让用户手动运行长期前台进程；应安装托管服务。
 
 ### Operation Manager
 

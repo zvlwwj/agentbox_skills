@@ -2,6 +2,27 @@ import path from "node:path";
 
 import { openClawDataDir, readJsonFile } from "./common.js";
 
+const RUNTIME_CONFIG_FILE = "runtime_config.json";
+
+function defaultRpcUrlForChain(chainId) {
+  if (chainId === 8453) return "https://mainnet.base.org";
+  if (chainId === 84532) return "https://sepolia.base.org";
+  return "https://mainnet.base.org";
+}
+
+function normalizeRpcUrl(value) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return "";
+  }
+}
+
 export function resolveAgentboxDataDir(overrides = {}) {
   return overrides.dataDir || process.env.AGENTBOX_DATA_DIR || openClawDataDir();
 }
@@ -12,13 +33,16 @@ export function loadSettings(pluginRoot, overrides = {}) {
   const deploymentsPayload = readJsonFile(deploymentsPath, {}) || {};
   const contracts = deploymentsPayload.contracts || {};
   const dataDir = resolveAgentboxDataDir(overrides);
+  const runtimeConfig = readJsonFile(path.join(dataDir, RUNTIME_CONFIG_FILE), {}) || {};
+  const chainId = Number(process.env.AGENTBOX_CHAIN_ID || deploymentsPayload.chainId || 8453);
+  const configuredRpcUrl = normalizeRpcUrl(runtimeConfig.rpcUrl);
   const settings = {
     pluginRoot,
     coreRoot,
     dataDir,
     signerStoreDir: path.join(dataDir, "signers"),
-    rpcUrl: "https://sepolia.base.org",
-    chainId: 84532,
+    rpcUrl: normalizeRpcUrl(process.env.AGENTBOX_RPC_URL) || configuredRpcUrl || defaultRpcUrlForChain(chainId),
+    chainId,
     coreAddress: contracts.Core_Diamond,
     roleAddress: contracts.Role_NFT,
     landAddress: contracts.Land_ERC721,

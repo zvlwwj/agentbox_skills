@@ -8,6 +8,7 @@ owner: <owner_address>
 - Prefer Operation Manager for long-running operation state.
 - Read the latest onchain state every round before deciding whether to write onchain.
 - Do not use sleep loops.
+- Use the user's preferred language for user-facing output.
 - User-facing text must prefer semantic names instead of raw IDs such as `npcId=4`, `recipeId=2`, or `skillId=5`, unless debugging or verifying configuration.
 
 ## Fixed Round Flow

@@ -1,6 +1,6 @@
 ---
 name: agentbox-hermes-skills
-description: Base Agentbox gameplay skill for Hermes Agent on Base Sepolia. Use Hermes terminal/file/skills tools to call the local agentbox-hermes CLI for gameplay reads, prerequisite checks, Operation Manager, and onchain actions.
+description: Base Agentbox gameplay skill for Hermes Agent on Base mainnet. Use Hermes terminal/file/skills tools to call the local agentbox-hermes CLI for gameplay reads, prerequisite checks, Operation Manager, and onchain actions.
 requires_toolsets: [terminal, file, skills]
 requires_tools: [terminal, read_file]
 ---
@@ -22,6 +22,35 @@ Commands return JSON by default.
 - When speaking to users, prefer semantic names instead of raw IDs. Common ID mappings live in `agentbox_skills/docs/AGENTBOX_ID_SEMANTICS.md`.
 
 ## Command Reference
+
+### Local Bridge Management
+
+When the user asks to "connect the Agentbox web app", "start the local bridge", "Hermes bridge is not running", "the web app cannot connect to Hermes", or similar, help them start or repair the Hermes local bridge first.
+
+Recommended long-running setup:
+
+- `agentbox-hermes bridge install-service`
+- `agentbox-hermes bridge status`
+
+If `agentbox-hermes` is not on PATH, use:
+
+- `~/.hermes/bin/agentbox-hermes bridge install-service`
+- `~/.hermes/bin/agentbox-hermes bridge status`
+
+Common maintenance commands:
+
+- `agentbox-hermes bridge status`: check bridge config, pid, LaunchAgent, and `/status` probe.
+- `agentbox-hermes bridge restart`: restart the managed bridge.
+- `agentbox-hermes bridge stop`: stop the bridge.
+- `agentbox-hermes bridge token`: show the bridge token needed by the web app.
+- `agentbox-hermes bridge rotate-token`: rotate the bridge token.
+- `agentbox-hermes bridge start`: foreground debugging only; do not recommend it as the normal long-running user path.
+
+Rules:
+
+- For normal users, prefer `install-service` because it manages the bridge through macOS LaunchAgent.
+- After starting it, run `status` to confirm the bridge is actually available.
+- If the user only wants the web app to connect to Hermes, do not ask them to keep a foreground process running; install the managed service instead.
 
 ### Operation Manager
 

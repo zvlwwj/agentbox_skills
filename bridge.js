@@ -430,25 +430,28 @@ function writeRuntimeResult(res, origin, result, formatter = null) {
   writeJson(res, 200, formatter ? formatter(result) : { ok: true, ...runtimeData(result) }, origin);
 }
 
-function formatBridgeAccountStatus(signerResult, activeRoleResult) {
-  const signerData = runtimeData(signerResult);
-  const activeData = runtimeData(activeRoleResult);
-  const signer = signerData.signer && typeof signerData.signer === "object" ? signerData.signer : null;
+function formatBridgeLocalAccountStatus(runtime) {
+  const signerRecord = runtime?.signers?.loadRecord?.() || null;
+  const activeRole = runtime?.activeRoles?.loadRecord?.() || null;
+  const ownedRoles = signerRecord?.address ? runtime?.ownedRoles?.loadForOwner?.(signerRecord.address) || [] : [];
+  const activeRoleOwnedBySigner = Boolean(
+    signerRecord?.address &&
+    activeRole?.ownerAddress &&
+    String(signerRecord.address).toLowerCase() === String(activeRole.ownerAddress).toLowerCase()
+  );
   return {
     ok: true,
     signer: {
-      exists: Boolean(signerData.hasSigner && signer),
-      signerId: signer?.signerId ?? null,
-      ownerAddress: signer?.address ?? null,
-      label: signer?.label ?? null,
-      balanceEth: signer?.balanceEth ?? null,
+      exists: Boolean(signerRecord?.address),
+      signerId: signerRecord?.signer_id ?? null,
+      ownerAddress: signerRecord?.address ?? null,
+      label: signerRecord?.label ?? null,
     },
-    activeRole: activeData.activeRole ?? signerData.activeRole ?? null,
-    hasActiveRole: Boolean(activeData.hasActiveRole ?? signerData.hasActiveRole),
-    activeRoleOwnedBySigner: Boolean(activeData.isOwnedByActiveSigner ?? signerData.activeRoleOwnedBySigner),
-    ownedRolesCount: Number(signerData.ownedRolesCount ?? activeData.ownedRolesCount ?? 0),
-    registrationFeeEth: signerData.registrationFeeEth ?? null,
-    warning: formatBridgeWarning(activeData.warning),
+    activeRole: activeRole?.roleWallet ? activeRole : null,
+    hasActiveRole: Boolean(activeRole?.roleWallet),
+    activeRoleOwnedBySigner,
+    ownedRolesCount: ownedRoles.length,
+    warning: null,
   };
 }
 
@@ -462,31 +465,30 @@ function formatBridgeSigner(result, { includePrivateKey = false } = {}) {
       signerId: signer?.signerId ?? null,
       ownerAddress: signer?.address ?? null,
       label: signer?.label ?? null,
-      balanceEth: signer?.balanceEth ?? null,
       hasPrivateKey: Boolean(signer?.hasPrivateKey || signer?.privateKey),
       ...(includePrivateKey && signer?.privateKey ? { privateKey: signer.privateKey } : {}),
     },
     ownedRolesCount: Number(data.ownedRolesCount ?? 0),
     activeRole: data.activeRole ?? null,
+    ownedRoles: Array.isArray(data.ownedRoles) ? data.ownedRoles : [],
+    warnings: Array.isArray(data.warnings) ? data.warnings : [],
   };
 }
 
-function formatBridgeRoles(result) {
-  const data = runtimeData(result);
-  const activeRoleWallet = data.activeRole?.roleWallet?.toLowerCase?.() || "";
-  const ownedRoles = Array.isArray(data.ownedRoles)
-    ? data.ownedRoles.map((role) => ({
-        roleId: role.roleId ?? null,
-        roleWallet: role.roleWallet ?? "",
-        ownerAddress: role.ownerAddress ?? data.ownerAddress ?? "",
-        isActive: Boolean(role.isActive || (activeRoleWallet && role.roleWallet?.toLowerCase?.() === activeRoleWallet)),
-      }))
-    : [];
+function formatBridgeLocalRoles(runtime) {
+  const signerRecord = runtime?.signers?.loadRecord?.() || null;
+  const activeRole = runtime?.activeRoles?.loadRecord?.() || null;
+  const activeRoleWallet = activeRole?.roleWallet?.toLowerCase() || null;
+  const cachedRoles = signerRecord?.address ? runtime?.ownedRoles?.loadForOwner?.(signerRecord.address) || [] : [];
+  const ownedRoles = cachedRoles.map((role) => ({
+    ...role,
+    isActive: Boolean(activeRoleWallet && role.roleWallet.toLowerCase() === activeRoleWallet),
+  }));
   return {
     ok: true,
-    ownerAddress: data.ownerAddress ?? null,
-    activeRole: data.activeRole ?? null,
-    ownedRolesCount: Number(data.ownedRolesCount ?? ownedRoles.length),
+    ownerAddress: signerRecord?.address ?? activeRole?.ownerAddress ?? null,
+    activeRole: activeRole?.roleWallet ? activeRole : null,
+    ownedRolesCount: ownedRoles.length,
     ownedRoles,
   };
 }
@@ -545,8 +547,8 @@ function normalizeBackgroundLanguage(value, ...textHints) {
   return /[\u3400-\u9fff]/.test(joined) ? "zh" : "en";
 }
 
-function backgroundTemplateUrl(language) {
-  return new URL(language === "zh" ? "./docs/OPENCLAW_CRON_PROMPT_CN.md" : "./docs/OPENCLAW_CRON_PROMPT.md", import.meta.url);
+function backgroundTemplateUrl() {
+  return new URL("./docs/OPENCLAW_CRON_PROMPT.md", import.meta.url);
 }
 
 function backgroundMetadataFromMessage(message) {
@@ -580,25 +582,18 @@ async function readActiveRoleForBackground(runtime) {
 
 async function buildBackgroundPrompt({ runtime, language }) {
   const resolvedLanguage = normalizeBackgroundLanguage(language, "", "");
-  const template = await fs.readFile(backgroundTemplateUrl(resolvedLanguage), "utf8");
+  const template = await fs.readFile(backgroundTemplateUrl(), "utf8");
   const { activeRole, ownerAddress } = await readActiveRoleForBackground(runtime);
   const roleWallet = activeRole?.roleWallet || "<rolewallet_address>";
   const owner = activeRole?.ownerAddress || ownerAddress || "<owner_address>";
   const currentTime = new Date().toISOString();
-  const contextBlock =
-    resolvedLanguage === "zh"
-      ? [
-          "## 自定义策略",
-          "",
-          "- 自定义策略保存在 Operation Manager 的 `customStrategy` 字段中。",
-          "- 每轮先读取 `agentbox_operations_read_state`，并根据其中的 `customStrategy` 调整计划。",
-        ].join("\n")
-      : [
-          "## Custom Strategy",
-          "",
-          "- The custom strategy is stored in the Operation Manager `customStrategy` field.",
-          "- Read `agentbox_operations_read_state` first each round, and adjust plans according to `customStrategy`.",
-        ].join("\n");
+  const contextBlock = [
+    "## Custom Strategy",
+    "",
+    "- The custom strategy is stored in the Operation Manager `customStrategy` field.",
+    "- Read `agentbox_operations_read_state` first each round, and adjust plans according to `customStrategy`.",
+    "- Use the user's preferred language for user-facing output.",
+  ].join("\n");
   const metadata = {
     language: resolvedLanguage,
     roleWallet,
@@ -839,7 +834,7 @@ async function setBackgroundJobEnabled(api, jobId, enabled) {
 
 async function runBackgroundJobNow(api, jobId) {
   return await callCronRpc("cron.run", {
-    jobId,
+    id: jobId,
     mode: "force",
   });
 }
@@ -847,6 +842,30 @@ async function runBackgroundJobNow(api, jobId) {
 function isOriginAllowed(origin, allowedOrigins) {
   if (!origin) return true;
   return allowedOrigins.includes(origin);
+}
+
+async function ensureLocalSignerForBridge(runtime, logger) {
+  try {
+    const existing = runtime?.signers?.loadRecord?.();
+    if (existing) return;
+    const result = await runtime.invoke("agentbox.signer.prepare", {
+      label: "local-gameplay-signer",
+    });
+    if (result?.ok) {
+      const signer = result?.data?.data || result?.details?.data || result?.data || {};
+      logger?.info?.(
+        `agentbox bridge: created local gameplay signer${signer.address ? ` ${signer.address}` : ""}`
+      );
+      return;
+    }
+    logger?.warn?.(`agentbox bridge: failed to create local gameplay signer: ${JSON.stringify(result)}`);
+  } catch (error) {
+    logger?.warn?.(
+      `agentbox bridge: failed to ensure local gameplay signer: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
 }
 
 class OpenClawBridgeHub {
@@ -1385,6 +1404,39 @@ function createBridgeHandler(api, hub, pairingManager, streamTicketManager, rout
       return true;
     }
 
+    if (routeName === "config-rpc") {
+      if (req.method === "GET") {
+        writeJson(res, 200, runtime.getRpcConfig(), origin);
+        return true;
+      }
+      if (req.method !== "POST") {
+        writeText(res, 405, "Method Not Allowed", origin);
+        return true;
+      }
+      let body = {};
+      try {
+        body = await readJsonBody(req);
+      } catch {
+        writeJson(res, 400, { ok: false, error: "invalid_json" }, origin);
+        return true;
+      }
+      try {
+        writeJson(res, 200, runtime.updateRpcConfig(body.rpcUrl), origin);
+      } catch (error) {
+        writeJson(
+          res,
+          400,
+          {
+            ok: false,
+            error: error?.errorCode || "invalid_rpc_url",
+            message: error instanceof Error ? error.message : String(error),
+          },
+          origin
+        );
+      }
+      return true;
+    }
+
     if (routeName === "session-ensure") {
       const { entry } = readSessionStore(api, runtimeSessionKey);
       writeJson(
@@ -1427,29 +1479,30 @@ function createBridgeHandler(api, hub, pairingManager, streamTicketManager, rout
           writeJson(res, 500, { ok: false, error: "agentbox_runtime_unavailable" }, origin);
           return true;
         }
-        const result = await runtime.invoke("agentbox.roles.read_active", {});
-        const payload = formatBridgeActiveRole(result);
-        if (payload.activeRole?.roleWallet) {
-          try {
-            const snapshot = await runtime.invoke("agentbox.skills.read_role_snapshot", {
-              role: payload.activeRole.roleWallet,
-              source: "auto",
-            });
-            const role = snapshot?.data?.dynamicInfo?.role || {};
-            const identity = snapshot?.data?.staticInfo?.identity || {};
-            payload.activeRole = {
-              ...payload.activeRole,
-              roleId: payload.activeRole.roleId ?? identity.roleId ?? null,
-              x: role.x ?? payload.activeRole.x,
-              y: role.y ?? payload.activeRole.y,
-              state: role.state ?? payload.activeRole.state,
-              stateName: role.stateName ?? payload.activeRole.stateName,
-            };
-          } catch {
-            // Keep the validated active role even if the live snapshot is temporarily unavailable.
-          }
-        }
-        writeJson(res, 200, payload, origin);
+        const activeRole = runtime?.activeRoles?.loadRecord?.() || null;
+        writeJson(
+          res,
+          200,
+          {
+            ok: true,
+            hasActiveRole: Boolean(activeRole?.roleWallet),
+            isOwnedByActiveSigner: Boolean(activeRole?.roleWallet),
+            warning: null,
+            activeRole: activeRole?.roleWallet
+              ? {
+                  roleId: activeRole.roleId ?? null,
+                  roleWallet: activeRole.roleWallet,
+                  ownerAddress: activeRole.ownerAddress ?? "",
+                  x: null,
+                  y: null,
+                  state: null,
+                  stateName: "",
+                  nickname: "",
+                }
+              : null,
+          },
+          origin
+        );
       } catch (error) {
         writeJson(
           res,
@@ -1479,16 +1532,7 @@ function createBridgeHandler(api, hub, pairingManager, streamTicketManager, rout
         writeText(res, 405, "Method Not Allowed", origin);
         return true;
       }
-      const signerResult = await runtime.invoke("agentbox.signer.read", {});
-      if (!signerResult?.ok) {
-        writeRuntimeResult(res, origin, signerResult);
-        return true;
-      }
-      let activeRoleResult = { ok: true, data: { activeRole: null, hasActiveRole: false, ownedRolesCount: 0 } };
-      if (runtimeData(signerResult).hasSigner) {
-        activeRoleResult = await runtime.invoke("agentbox.roles.read_active", {});
-      }
-      writeJson(res, 200, formatBridgeAccountStatus(signerResult, activeRoleResult), origin);
+      writeJson(res, 200, formatBridgeLocalAccountStatus(runtime), origin);
       return true;
     }
 
@@ -1573,8 +1617,7 @@ function createBridgeHandler(api, hub, pairingManager, streamTicketManager, rout
         writeText(res, 405, "Method Not Allowed", origin);
         return true;
       }
-      const result = await runtime.invoke("agentbox.roles.list_owned", {});
-      writeRuntimeResult(res, origin, result, formatBridgeRoles);
+      writeJson(res, 200, formatBridgeLocalRoles(runtime), origin);
       return true;
     }
 
@@ -1871,6 +1914,7 @@ function registerBridgeRoutes(api, hub, pairingManager, streamTicketManager, run
     { path: "/plugins/agentbox-skills/bridge/pair/approve", routeName: "pair-approve", auth: "plugin" },
     { path: "/plugins/agentbox-skills/bridge/pair/approve-page", routeName: "pair-approve-page", auth: "plugin" },
     { path: "/plugins/agentbox-skills/bridge/auth/verify", routeName: "auth-verify", auth: "plugin" },
+    { path: "/plugins/agentbox-skills/bridge/config/rpc", routeName: "config-rpc", auth: "plugin" },
     { path: "/plugins/agentbox-skills/bridge/session/ensure", routeName: "session-ensure", auth: "plugin" },
     { path: "/plugins/agentbox-skills/bridge/history", routeName: "history", auth: "plugin" },
     { path: "/plugins/agentbox-skills/bridge/game/active-role", routeName: "game-active-role", auth: "plugin" },
@@ -1911,6 +1955,7 @@ function registerBridge(api, runtime) {
   api.registerService({
     id: "agentbox-bridge-sse",
     start: async () => {
+      await ensureLocalSignerForBridge(runtime, api.logger);
       hub.start();
     },
     stop: async () => {
