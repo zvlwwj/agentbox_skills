@@ -74,9 +74,63 @@ If verification succeeds, tell the user to restart Hermes or open a fresh Hermes
 
 If the user asks to repair or update Agentbox, repeat the install steps. Replacing the bundle directory is safe as long as `~/.hermes/agentbox/` runtime data is preserved.
 
+## Uninstall
+
+Use this section when the user asks to uninstall, remove, clean up, or reset Agentbox for Hermes.
+
+Default behavior:
+
+- Preserve user runtime data.
+- Stop and remove the local bridge service.
+- Remove the installed bundle and CLI shim.
+- Do not delete signer, role, operation, or bridge token files unless the user explicitly asks for a full data reset.
+
+Run:
+
+```bash
+set -e
+if [ -x ~/.hermes/bin/agentbox-hermes ]; then
+  ~/.hermes/bin/agentbox-hermes bridge uninstall-service || true
+fi
+rm -rf ~/.hermes/agentbox/bundle/agentbox-hermes
+rm -f ~/.hermes/bin/agentbox-hermes
+```
+
+After a normal uninstall, tell the user that local Agentbox runtime data is still preserved under:
+
+```text
+~/.hermes/agentbox/
+```
+
+## Full Data Reset
+
+Only use this section when the user explicitly asks to delete private keys, reset all Agentbox data, or remove everything.
+
+Before running the reset, warn the user that this deletes local signer/private key data and ask for explicit confirmation.
+
+Run only after confirmation:
+
+```bash
+set -e
+if [ -x ~/.hermes/bin/agentbox-hermes ]; then
+  ~/.hermes/bin/agentbox-hermes bridge uninstall-service || true
+fi
+rm -rf ~/.hermes/agentbox
+rm -f ~/.hermes/bin/agentbox-hermes
+```
+
+## Uninstall This Installer Skill
+
+If the user only wants to remove this bootstrap skill itself, run:
+
+```bash
+hermes skills uninstall agentbox-hermes-installer
+```
+
 ## Rules
 
 - Do not ask the user to manually download the archive unless automatic download fails.
 - Do not delete `~/.hermes/agentbox/active_signer.json`, role files, operation files, bridge config, or other runtime data.
 - Do not continue with gameplay actions during this install flow.
 - If `npm install` fails because of proxy or registry settings, inspect npm logs and explain the concrete cause.
+- Never run the full data reset unless the user explicitly confirms they want to delete local private key data.

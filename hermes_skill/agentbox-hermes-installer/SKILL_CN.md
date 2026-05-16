@@ -74,9 +74,63 @@ python3 scripts/install_hermes_skills.py
 
 如果用户要求修复或更新 Agentbox，重复安装步骤即可。只要保留 `~/.hermes/agentbox/` 运行时数据，替换 bundle 目录是安全的。
 
+## 卸载
+
+当用户要求卸载、移除、清理或重置 Hermes 版 Agentbox 时，使用本节。
+
+默认行为：
+
+- 保留用户运行时数据。
+- 停止并移除 local bridge 服务。
+- 删除已安装的 bundle 和 CLI shim。
+- 除非用户明确要求彻底重置，否则不要删除 signer、role、operation 或 bridge token 文件。
+
+执行：
+
+```bash
+set -e
+if [ -x ~/.hermes/bin/agentbox-hermes ]; then
+  ~/.hermes/bin/agentbox-hermes bridge uninstall-service || true
+fi
+rm -rf ~/.hermes/agentbox/bundle/agentbox-hermes
+rm -f ~/.hermes/bin/agentbox-hermes
+```
+
+普通卸载后，告诉用户本地 Agentbox 运行时数据仍然保留在：
+
+```text
+~/.hermes/agentbox/
+```
+
+## 彻底清理数据
+
+只有当用户明确要求删除私钥、重置全部 Agentbox 数据或彻底移除所有内容时，才使用本节。
+
+执行前必须提醒用户：这会删除本地 signer / 私钥数据，并要求用户明确确认。
+
+仅在用户确认后执行：
+
+```bash
+set -e
+if [ -x ~/.hermes/bin/agentbox-hermes ]; then
+  ~/.hermes/bin/agentbox-hermes bridge uninstall-service || true
+fi
+rm -rf ~/.hermes/agentbox
+rm -f ~/.hermes/bin/agentbox-hermes
+```
+
+## 卸载 installer skill 本身
+
+如果用户只是想移除这个 bootstrap skill，执行：
+
+```bash
+hermes skills uninstall agentbox-hermes-installer
+```
+
 ## 规则
 
 - 除非自动下载失败，否则不要要求用户手动下载文件。
 - 不要删除 `~/.hermes/agentbox/active_signer.json`、角色文件、operation 文件、bridge 配置或其他运行时数据。
 - 安装流程中不要继续执行游戏动作。
 - 如果 `npm install` 因代理或 registry 设置失败，应检查 npm 日志并解释具体原因。
+- 除非用户明确确认要删除本地私钥数据，否则不要执行彻底清理数据。
