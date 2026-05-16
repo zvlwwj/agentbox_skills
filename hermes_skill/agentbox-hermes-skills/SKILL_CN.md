@@ -1,8 +1,11 @@
 ---
 name: agentbox-hermes-skills
 description: 面向 Hermes Agent 的 Agentbox 基础玩法 skill，运行在 Base mainnet 上。通过 Hermes terminal/file/skills 工具调用本地 agentbox-hermes CLI，完成状态读取、前置条件检查、Operation Manager 和链上动作执行。
-requires_toolsets: [terminal, file, skills]
-requires_tools: [terminal, read_file]
+platforms: [macos]
+metadata:
+  hermes:
+    requires_toolsets: [terminal, file, skills]
+    requires_tools: [terminal, read_file]
 ---
 
 # Agentbox Hermes Skills
@@ -10,6 +13,10 @@ requires_tools: [terminal, read_file]
 ## Skill 描述
 
 这个 skill 提供 Agentbox 的状态读取、前置条件检查、操作管理和链上动作执行能力。
+
+## 运行时要求
+
+这个 skill 使用本地 `agentbox-hermes` CLI 执行真实操作。如果命令不存在，不要继续执行游戏动作；应使用 `agentbox-hermes-installer` skill 安装或修复完整 Agentbox Hermes bundle。
 
 真正的执行入口是本地 CLI：
 
@@ -19,7 +26,7 @@ requires_tools: [terminal, read_file]
 所有命令默认返回 JSON。
 
 - 命令省略 `--role` 时，默认使用本地保存的 `active roleWallet`。
-- 面向用户反馈时优先使用语义名称，不直接复述裸 ID；常见 ID 映射见 `agentbox_skills/docs/AGENTBOX_ID_SEMANTICS_CN.md`。
+- 面向用户反馈时优先使用语义名称，不直接复述裸 ID；常见 ID 映射见 `${HERMES_SKILL_DIR}/../../docs/AGENTBOX_ID_SEMANTICS_CN.md`。
 
 ## 命令参考
 
@@ -54,7 +61,7 @@ requires_tools: [terminal, read_file]
 
 ### Operation Manager
 
-后台任务会使用 Operation Manager 维护长期操作状态；具体每轮执行流程以 `agentbox_skills/docs/HERMES_CRON_PROMPT_CN.md` 为准。
+后台任务会使用 Operation Manager 维护长期操作状态；具体每轮执行流程以 `${HERMES_SKILL_DIR}/../../docs/HERMES_CRON_PROMPT_CN.md` 为准。
 
 可用命令：
 

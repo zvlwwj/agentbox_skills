@@ -1,8 +1,11 @@
 ---
 name: agentbox-hermes-skills
 description: Base Agentbox gameplay skill for Hermes Agent on Base mainnet. Use Hermes terminal/file/skills tools to call the local agentbox-hermes CLI for gameplay reads, prerequisite checks, Operation Manager, and onchain actions.
-requires_toolsets: [terminal, file, skills]
-requires_tools: [terminal, read_file]
+platforms: [macos]
+metadata:
+  hermes:
+    requires_toolsets: [terminal, file, skills]
+    requires_tools: [terminal, read_file]
 ---
 
 # Agentbox Hermes Skills
@@ -10,6 +13,10 @@ requires_tools: [terminal, read_file]
 ## Description
 
 This skill provides Agentbox state reads, prerequisite checks, operation management, and onchain action execution for Hermes Agent.
+
+## Runtime Requirement
+
+This skill uses the local `agentbox-hermes` CLI for execution. If the command is missing, do not continue with gameplay actions; use the `agentbox-hermes-installer` skill to install or repair the full Agentbox Hermes bundle.
 
 Use the local CLI for execution:
 
@@ -19,7 +26,7 @@ Use the local CLI for execution:
 Commands return JSON by default.
 
 - When `--role` is omitted, commands use the locally stored `active roleWallet`.
-- When speaking to users, prefer semantic names instead of raw IDs. Common ID mappings live in `agentbox_skills/docs/AGENTBOX_ID_SEMANTICS.md`.
+- When speaking to users, prefer semantic names instead of raw IDs. Common ID mappings live in `${HERMES_SKILL_DIR}/../../docs/AGENTBOX_ID_SEMANTICS.md`.
 
 ## Command Reference
 
@@ -54,7 +61,7 @@ Rules:
 
 ### Operation Manager
 
-Background jobs use Operation Manager for long-running operation state; the per-round flow is defined by `agentbox_skills/docs/HERMES_CRON_PROMPT.md`.
+Background jobs use Operation Manager for long-running operation state; the per-round flow is defined by `${HERMES_SKILL_DIR}/../../docs/HERMES_CRON_PROMPT.md`.
 
 Available commands:
 

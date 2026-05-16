@@ -39,7 +39,8 @@ def parse_args() -> argparse.Namespace:
 
 def _ensure_hermes_config() -> None:
     if not HERMES_CONFIG_PATH.exists():
-        raise SystemExit(f"Hermes config was not found: {HERMES_CONFIG_PATH}")
+        HERMES_ROOT.mkdir(parents=True, exist_ok=True)
+        HERMES_CONFIG_PATH.write_text("skills:\n  external_dirs: []\n")
 
 
 def _read_config_lines() -> list[str]:
@@ -53,7 +54,8 @@ def _write_config_lines(lines: list[str]) -> None:
 def _find_skills_block(lines: list[str]) -> tuple[int, int]:
     start = next((idx for idx, line in enumerate(lines) if line.strip() == "skills:"), -1)
     if start == -1:
-        raise SystemExit("Could not find `skills:` block in ~/.hermes/config.yaml")
+        lines.extend(["", "skills:", "  external_dirs: []"])
+        start = len(lines) - 2
     end = len(lines)
     for idx in range(start + 1, len(lines)):
         line = lines[idx]

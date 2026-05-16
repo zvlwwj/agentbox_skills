@@ -569,9 +569,8 @@ async function readCustomStrategy(runtime) {
   return runtimeData(result).customStrategy || runtimeData(result).data?.customStrategy || "";
 }
 
-async function buildHermesBackgroundPrompt(language = "en") {
-  const file = language === "zh" ? "HERMES_CRON_PROMPT_CN.md" : "HERMES_CRON_PROMPT.md";
-  const templatePath = path.join(PLUGIN_ROOT, "docs", file);
+async function buildHermesBackgroundPrompt() {
+  const templatePath = path.join(PLUGIN_ROOT, "docs", "HERMES_CRON_PROMPT.md");
   try {
     return (await fsp.readFile(templatePath, "utf8")).trim();
   } catch {
@@ -581,8 +580,7 @@ async function buildHermesBackgroundPrompt(language = "en") {
 
 async function createOrUpdateBackgroundJob(runtime, body = {}) {
   const intervalMinutes = normalizeIntervalMinutes(body.intervalMinutes);
-  const language = body.language === "zh" ? "zh" : "en";
-  const prompt = await buildHermesBackgroundPrompt(language);
+  const prompt = await buildHermesBackgroundPrompt();
   const existing = await findBackgroundJob();
   if (typeof body.customStrategy === "string") {
     await runtime.invoke("agentbox.operations.update_strategy", { customStrategy: body.customStrategy });
