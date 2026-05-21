@@ -532,7 +532,7 @@ function normalizeIntervalMinutes(value, fallback = AGENTBOX_BACKGROUND_DEFAULT_
   return Math.min(1440, Math.max(1, Math.round(numeric)));
 }
 
-function formatBackgroundJobStatus(job, customStrategy = "") {
+async function formatBackgroundJobStatus(job, customStrategy = "") {
   if (!job) {
     return {
       ok: true,
@@ -544,11 +544,16 @@ function formatBackgroundJobStatus(job, customStrategy = "") {
       intervalMinutes: null,
       sessionKey: "session:agentbox-background-runner",
       customStrategy,
+      customCronPrompt: null,
+      currentCronPrompt: null,
+      usingCustomCronPrompt: false,
       lastRunAt: null,
       lastRunStatus: null,
     };
   }
   const intervalMatch = String(job.schedule || "").match(/(?:every|once in)\s+(\d+)m/i);
+  const intervalMinutes = intervalMatch ? Number(intervalMatch[1]) : AGENTBOX_BACKGROUND_DEFAULT_INTERVAL_MINUTES;
+  const currentCronPrompt = await buildHermesBackgroundPrompt(intervalMinutes);
   return {
     ok: true,
     exists: true,
@@ -556,9 +561,12 @@ function formatBackgroundJobStatus(job, customStrategy = "") {
     jobId: job.id || null,
     name: job.name || AGENTBOX_BACKGROUND_JOB_NAME,
     schedule: job.schedule || null,
-    intervalMinutes: intervalMatch ? Number(intervalMatch[1]) : null,
+    intervalMinutes,
     sessionKey: "session:agentbox-background-runner",
     customStrategy,
+    customCronPrompt: null,
+    currentCronPrompt,
+    usingCustomCronPrompt: false,
     lastRunAt: job.state?.lastRunAt ? Date.parse(job.state.lastRunAt) || null : null,
     lastRunStatus: job.state?.lastRunStatus || null,
   };
@@ -569,18 +577,28 @@ async function readCustomStrategy(runtime) {
   return runtimeData(result).customStrategy || runtimeData(result).data?.customStrategy || "";
 }
 
-async function buildHermesBackgroundPrompt() {
+async function buildHermesBackgroundPrompt(intervalMinutes = 30) {
   const templatePath = path.join(PLUGIN_ROOT, "docs", "HERMES_CRON_PROMPT.md");
+  const cronIntervalMinutes = normalizeIntervalMinutes(intervalMinutes);
+  const cronIntervalSeconds = cronIntervalMinutes * 60;
   try {
-    return (await fsp.readFile(templatePath, "utf8")).trim();
+    const template = await fsp.readFile(templatePath, "utf8");
+    return template
+      .replaceAll("<cron_interval_minutes>", String(cronIntervalMinutes))
+      .replaceAll("<cron_interval_seconds>", String(cronIntervalSeconds))
+      .trim();
   } catch {
     return "Run Agentbox background gameplay for the active role. Read Operation Manager state first and execute one safe next action.";
   }
 }
 
+function normalizeCustomCronPrompt(value) {
+  return typeof value === "string" ? value.trim().slice(0, 20000) : "";
+}
+
 async function createOrUpdateBackgroundJob(runtime, body = {}) {
   const intervalMinutes = normalizeIntervalMinutes(body.intervalMinutes);
-  const prompt = await buildHermesBackgroundPrompt();
+  const prompt = normalizeCustomCronPrompt(body.customCronPrompt) || await buildHermesBackgroundPrompt(intervalMinutes);
   const existing = await findBackgroundJob();
   if (typeof body.customStrategy === "string") {
     await runtime.invoke("agentbox.operations.update_strategy", { customStrategy: body.customStrategy });
@@ -1017,7 +1035,7 @@ async function main() {
         return;
       }
       if (route === "/background/status") {
-        writeJson(res, 200, formatBackgroundJobStatus(await findBackgroundJob(), await readCustomStrategy(runtime)), origin, latestConfig);
+        writeJson(res, 200, await formatBackgroundJobStatus(await findBackgroundJob(), await readCustomStrategy(runtime)), origin, latestConfig);
         return;
       }
       if (route === "/background/start" || route === "/background/update-goal") {
@@ -1028,7 +1046,7 @@ async function main() {
           }
           const existing = await findBackgroundJob();
           if (!existing) {
-            writeJson(res, 200, formatBackgroundJobStatus(null, await readCustomStrategy(runtime)), origin, latestConfig);
+            writeJson(res, 200, await formatBackgroundJobStatus(null, await readCustomStrategy(runtime)), origin, latestConfig);
             return;
           }
         }
@@ -1037,7 +1055,7 @@ async function main() {
           const runResult = await spawnCommand(HERMES_CLI, ["cron", "run", job.id]);
           if (!runResult.ok) throw new Error(runResult.stderr || runResult.stdout || "Hermes cron run failed");
         }
-        writeJson(res, 200, formatBackgroundJobStatus(await findBackgroundJob(), await readCustomStrategy(runtime)), origin, latestConfig);
+        writeJson(res, 200, await formatBackgroundJobStatus(await findBackgroundJob(), await readCustomStrategy(runtime)), origin, latestConfig);
         return;
       }
       if (route === "/background/stop") {
@@ -1048,7 +1066,7 @@ async function main() {
         }
         const pauseResult = await spawnCommand(HERMES_CLI, ["cron", "pause", job.id]);
         if (!pauseResult.ok) throw new Error(pauseResult.stderr || pauseResult.stdout || "Hermes cron pause failed");
-        writeJson(res, 200, formatBackgroundJobStatus(await findBackgroundJob(), await readCustomStrategy(runtime)), origin, latestConfig);
+        writeJson(res, 200, await formatBackgroundJobStatus(await findBackgroundJob(), await readCustomStrategy(runtime)), origin, latestConfig);
         return;
       }
       if (route === "/send") {

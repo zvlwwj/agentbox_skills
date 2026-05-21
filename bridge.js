@@ -535,6 +535,11 @@ function sanitizeBackgroundText(value, fallback = "") {
   return value.trim().slice(0, 4000);
 }
 
+function sanitizeCronPromptText(value, fallback = "") {
+  if (typeof value !== "string") return fallback;
+  return value.trim().slice(0, 20000);
+}
+
 function normalizeBackgroundIntervalMinutes(value, fallback = 30) {
   const numeric = Number(value ?? fallback);
   if (!Number.isFinite(numeric)) return fallback;
@@ -565,6 +570,12 @@ function backgroundMetadataFromMessage(message) {
   }
 }
 
+function backgroundMessageWithoutMetadata(message) {
+  if (typeof message !== "string") return "";
+  const index = message.lastIndexOf(BACKGROUND_METADATA_PREFIX);
+  return (index >= 0 ? message.slice(0, index) : message).trim();
+}
+
 async function readActiveRoleForBackground(runtime) {
   if (!runtime?.invoke) {
     return { activeRole: null, ownerAddress: "", signerAddress: "" };
@@ -580,13 +591,16 @@ async function readActiveRoleForBackground(runtime) {
   };
 }
 
-async function buildBackgroundPrompt({ runtime, language }) {
+async function buildBackgroundPrompt({ runtime, language, intervalMinutes = 30, customCronPrompt = "" }) {
   const resolvedLanguage = normalizeBackgroundLanguage(language, "", "");
-  const template = await fs.readFile(backgroundTemplateUrl(), "utf8");
+  const customPrompt = sanitizeCronPromptText(customCronPrompt, "");
+  const template = customPrompt || await fs.readFile(backgroundTemplateUrl(), "utf8");
   const { activeRole, ownerAddress } = await readActiveRoleForBackground(runtime);
   const roleWallet = activeRole?.roleWallet || "<rolewallet_address>";
   const owner = activeRole?.ownerAddress || ownerAddress || "<owner_address>";
   const currentTime = new Date().toISOString();
+  const cronIntervalMinutes = normalizeBackgroundIntervalMinutes(intervalMinutes, 30);
+  const cronIntervalSeconds = cronIntervalMinutes * 60;
   const contextBlock = [
     "## Custom Strategy",
     "",
@@ -598,11 +612,16 @@ async function buildBackgroundPrompt({ runtime, language }) {
     language: resolvedLanguage,
     roleWallet,
     owner,
+    cronIntervalMinutes,
+    cronIntervalSeconds,
+    customCronPrompt: Boolean(customPrompt),
     updatedAt: currentTime,
   };
   const hydrated = template
     .replaceAll("<rolewallet_address>", roleWallet)
     .replaceAll("<owner_address>", owner)
+    .replaceAll("<cron_interval_minutes>", String(cronIntervalMinutes))
+    .replaceAll("<cron_interval_seconds>", String(cronIntervalSeconds))
     .replaceAll("{{CURRENT_TIME}}", currentTime);
   return `${hydrated.trim()}\n\n${contextBlock}\n\n${BACKGROUND_METADATA_PREFIX} ${JSON.stringify(metadata)}`;
 }
@@ -733,11 +752,16 @@ function formatBackgroundJobStatus(job) {
       intervalMinutes: null,
       sessionKey: AGENTBOX_BACKGROUND_SESSION_TARGET,
       customStrategy: null,
+      customCronPrompt: null,
+      currentCronPrompt: null,
+      usingCustomCronPrompt: false,
       lastRunAt: null,
       lastRunStatus: null,
     };
   }
   const metadata = backgroundMetadataFromMessage(job.payload?.message);
+  const usingCustomCronPrompt = metadata.customCronPrompt === true;
+  const currentCronPrompt = backgroundMessageWithoutMetadata(job.payload?.message);
   return {
     ok: true,
     exists: true,
@@ -748,6 +772,9 @@ function formatBackgroundJobStatus(job) {
     intervalMinutes: backgroundIntervalMinutes(job),
     sessionKey: job.sessionTarget || AGENTBOX_BACKGROUND_SESSION_TARGET,
     customStrategy: null,
+    customCronPrompt: usingCustomCronPrompt ? currentCronPrompt : null,
+    currentCronPrompt,
+    usingCustomCronPrompt,
     language: metadata.language === "zh" || metadata.language === "en" ? metadata.language : null,
     lastRunAt: Number.isFinite(job.state?.lastRunAtMs) ? job.state.lastRunAtMs : null,
     lastRunStatus: job.state?.lastRunStatus || job.state?.lastStatus || null,
@@ -1701,6 +1728,7 @@ function createBridgeHandler(api, hub, pairingManager, streamTicketManager, rout
         return true;
       }
       const customStrategy = sanitizeBackgroundText(body.customStrategy, "");
+      const customCronPrompt = sanitizeCronPromptText(body.customCronPrompt, "");
       const existingJob = findBackgroundJob(await listCronJobs(api));
       const intervalMinutes = normalizeBackgroundIntervalMinutes(
         body.intervalMinutes,
@@ -1720,6 +1748,8 @@ function createBridgeHandler(api, hub, pairingManager, streamTicketManager, rout
         const message = await buildBackgroundPrompt({
           runtime,
           language: body.language,
+          intervalMinutes,
+          customCronPrompt,
         });
         const enabled = routeName === "background-start" ? true : existingJob.enabled !== false;
         const job = await createOrUpdateBackgroundJob(api, message, { enabled, intervalMinutes });

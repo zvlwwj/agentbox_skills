@@ -49,6 +49,7 @@ function usage() {
   agentbox-hermes roles clear-active
 
   agentbox-hermes operations read-state [--role ADDRESS]
+  agentbox-hermes operations update-strategy [--role ADDRESS] --custom-strategy TEXT
   agentbox-hermes operations add-plan --goal TEXT --actions-json JSON [--priority N] [--source agent|user|cron|manual]
   agentbox-hermes operations start-next [--role ADDRESS]
   agentbox-hermes operations next-action [--role ADDRESS]
@@ -61,9 +62,16 @@ function usage() {
   agentbox-hermes read role-snapshot [--role ADDRESS] [--source auto|chain|indexer]
   agentbox-hermes read world-static [--role ADDRESS] [--source auto|chain|indexer]
   agentbox-hermes read world-dynamic [--role ADDRESS] [--source auto|chain|indexer]
+  agentbox-hermes read nearby-roles [--role ADDRESS] [--source auto|chain|indexer]
+  agentbox-hermes read nearby-lands [--role ADDRESS] [--source auto|chain|indexer]
   agentbox-hermes read land [--land-id ID | --x X --y Y] [--source auto|chain|indexer]
   agentbox-hermes read last-mint
+  agentbox-hermes read ground-tokens
   agentbox-hermes read global-config [--source auto|chain|indexer]
+
+  agentbox-hermes summarize role [--role ADDRESS]
+  agentbox-hermes summarize world-static [--role ADDRESS]
+  agentbox-hermes summarize world-dynamic [--role ADDRESS]
 
   agentbox-hermes check gather [--role ADDRESS] --amount N
   agentbox-hermes check learn [--role ADDRESS] --npc-id ID
@@ -75,6 +83,8 @@ function usage() {
   agentbox-hermes action move [--role ADDRESS] --x X --y Y
   agentbox-hermes action teleport [--role ADDRESS] --x X --y Y
   agentbox-hermes action learn [--role ADDRESS] --npc-id ID
+  agentbox-hermes action learn-player-request [--role ADDRESS] --teacher-wallet ADDRESS --skill-id ID
+  agentbox-hermes action learn-player-accept [--role ADDRESS] --student-wallet ADDRESS
   agentbox-hermes action gather [--role ADDRESS] --amount N
   agentbox-hermes action craft [--role ADDRESS] --recipe-id ID
   agentbox-hermes action attack [--role ADDRESS] --target-wallet ADDRESS
@@ -83,6 +93,10 @@ function usage() {
   agentbox-hermes action cancel [--role ADDRESS]
   agentbox-hermes action equip [--role ADDRESS] --equipment-id ID
   agentbox-hermes action unequip [--role ADDRESS] --slot ID
+  agentbox-hermes action land-buy [--role ADDRESS] --x X --y Y
+  agentbox-hermes action land-set-contract [--role ADDRESS] --x X --y Y --contract-address ADDRESS
+  agentbox-hermes action social-dm [--role ADDRESS] --to-wallet ADDRESS --message TEXT
+  agentbox-hermes action social-global [--role ADDRESS] --message TEXT
   agentbox-hermes action trigger-mint
   agentbox-hermes action stabilize [--role ADDRESS]
   agentbox-hermes action transfer [--role ADDRESS] --amount N
@@ -609,6 +623,11 @@ function buildInvocation(positional, flags) {
       switch (command) {
         case "read-state":
           return { toolName: "agentbox.operations.read_state", payload: { role: optionalString(flags, "role") } };
+        case "update-strategy":
+          return {
+            toolName: "agentbox.operations.update_strategy",
+            payload: { role: optionalString(flags, "role"), customStrategy: requireFlag(flags, "custom-strategy") },
+          };
         case "add-plan":
           return {
             toolName: "agentbox.operations.add_plan",
@@ -666,6 +685,10 @@ function buildInvocation(positional, flags) {
           return { toolName: "agentbox.skills.read_world_static_info", payload: { role: optionalString(flags, "role"), source: optionalString(flags, "source") } };
         case "world-dynamic":
           return { toolName: "agentbox.skills.read_world_dynamic_info", payload: { role: optionalString(flags, "role"), source: optionalString(flags, "source") } };
+        case "nearby-roles":
+          return { toolName: "agentbox.skills.read_nearby_roles", payload: { role: optionalString(flags, "role"), source: optionalString(flags, "source") } };
+        case "nearby-lands":
+          return { toolName: "agentbox.skills.read_nearby_lands", payload: { role: optionalString(flags, "role"), source: optionalString(flags, "source") } };
         case "land":
           return {
             toolName: "agentbox.skills.read_land",
@@ -678,10 +701,23 @@ function buildInvocation(positional, flags) {
           };
         case "last-mint":
           return { toolName: "agentbox.skills.read_last_mint", payload: {} };
+        case "ground-tokens":
+          return { toolName: "agentbox.skills.read_lands_with_ground_tokens", payload: {} };
         case "global-config":
           return { toolName: "agentbox.skills.read_global_config", payload: { source: optionalString(flags, "source") } };
         default:
           throw new Error(`Unknown read command: ${command || "(missing)"}`);
+      }
+    case "summarize":
+      switch (command) {
+        case "role":
+          return { toolName: "agentbox.skills.summarize_role_state", payload: { role: optionalString(flags, "role") } };
+        case "world-static":
+          return { toolName: "agentbox.skills.summarize_world_static_info", payload: { role: optionalString(flags, "role") } };
+        case "world-dynamic":
+          return { toolName: "agentbox.skills.summarize_world_dynamic_info", payload: { role: optionalString(flags, "role") } };
+        default:
+          throw new Error(`Unknown summarize command: ${command || "(missing)"}`);
       }
     case "check":
       switch (command) {
@@ -708,6 +744,20 @@ function buildInvocation(positional, flags) {
           return { toolName: "agentbox.skills.teleport.start", payload: { role: optionalString(flags, "role"), x: Number(requireFlag(flags, "x")), y: Number(requireFlag(flags, "y")) } };
         case "learn":
           return { toolName: "agentbox.skills.learn.npc.start", payload: { role: optionalString(flags, "role"), npcId: Number(requireFlag(flags, "npc-id")) } };
+        case "learn-player-request":
+          return {
+            toolName: "agentbox.skills.learn.player.request",
+            payload: {
+              role: optionalString(flags, "role"),
+              teacherWallet: requireFlag(flags, "teacher-wallet"),
+              skillId: Number(requireFlag(flags, "skill-id")),
+            },
+          };
+        case "learn-player-accept":
+          return {
+            toolName: "agentbox.skills.learn.player.accept",
+            payload: { role: optionalString(flags, "role"), studentWallet: requireFlag(flags, "student-wallet") },
+          };
         case "gather":
           return { toolName: "agentbox.skills.gather.start", payload: { role: optionalString(flags, "role"), amount: Number(requireFlag(flags, "amount")) } };
         case "craft":
@@ -724,6 +774,25 @@ function buildInvocation(positional, flags) {
           return { toolName: "agentbox.skills.equip.put_on", payload: { role: optionalString(flags, "role"), equipmentId: Number(requireFlag(flags, "equipment-id")) } };
         case "unequip":
           return { toolName: "agentbox.skills.equip.take_off", payload: { role: optionalString(flags, "role"), slot: Number(requireFlag(flags, "slot")) } };
+        case "land-buy":
+          return { toolName: "agentbox.skills.land.buy", payload: { role: optionalString(flags, "role"), x: Number(requireFlag(flags, "x")), y: Number(requireFlag(flags, "y")) } };
+        case "land-set-contract":
+          return {
+            toolName: "agentbox.skills.land.set_contract",
+            payload: {
+              role: optionalString(flags, "role"),
+              x: Number(requireFlag(flags, "x")),
+              y: Number(requireFlag(flags, "y")),
+              contractAddress: requireFlag(flags, "contract-address"),
+            },
+          };
+        case "social-dm":
+          return {
+            toolName: "agentbox.skills.social.dm",
+            payload: { role: optionalString(flags, "role"), toWallet: requireFlag(flags, "to-wallet"), message: requireFlag(flags, "message") },
+          };
+        case "social-global":
+          return { toolName: "agentbox.skills.social.global", payload: { role: optionalString(flags, "role"), message: requireFlag(flags, "message") } };
         case "trigger-mint":
           return { toolName: "agentbox.skills.trigger_mint", payload: {} };
         case "stabilize":

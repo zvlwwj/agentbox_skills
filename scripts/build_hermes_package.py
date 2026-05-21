@@ -76,7 +76,7 @@ python3 scripts/install_hermes_skills.py
 
 The installer will:
 
-- add `hermes_skill` to `~/.hermes/config.yaml` under `skills.external_dirs`
+- install `agentbox-hermes-skills` into `~/.hermes/skills/agentbox-hermes-skills`
 - create `~/.hermes/bin/agentbox-hermes`
 - initialize `~/.hermes/agentbox/`
 - install the optional managed local bridge service unless skipped
@@ -189,6 +189,13 @@ def write_manifest(package_dir: Path) -> None:
     (package_dir / "hermes-package.json").write_text(json.dumps(payload, indent=2) + "\n")
 
 
+def write_embedded_skill_docs(package_dir: Path) -> None:
+    docs_dir = package_dir / "hermes_skill" / "agentbox-hermes-skills" / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    for doc_name in ("AGENTBOX_ID_SEMANTICS.md", "HERMES_CRON_PROMPT.md"):
+        shutil.copy2(REPO_ROOT / "docs" / doc_name, docs_dir / doc_name)
+
+
 def write_installer_manifest(package_dir: Path) -> None:
     payload = {
         "package": INSTALLER_PACKAGE_DIR_NAME,
@@ -226,6 +233,7 @@ def build_package(output_root: Path, skip_checks: bool) -> Path:
 
     for relative_path in INCLUDED_FILES:
         copy_file(relative_path, package_dir)
+    write_embedded_skill_docs(package_dir)
     write_package_json(package_dir)
     write_readme(package_dir)
     write_manifest(package_dir)

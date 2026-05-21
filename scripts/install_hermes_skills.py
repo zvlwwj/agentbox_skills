@@ -13,11 +13,20 @@ HERMES_ROOT = Path.home() / ".hermes"
 HERMES_CONFIG_PATH = HERMES_ROOT / "config.yaml"
 HERMES_AGENTBOX_HOME = HERMES_ROOT / "agentbox"
 HERMES_BIN_DIR = HERMES_ROOT / "bin"
-HERMES_SKILL_DIR = REPO_ROOT / "hermes_skill"
+HERMES_SKILLS_DIR = HERMES_ROOT / "skills"
+SOURCE_SKILL_DIR = REPO_ROOT / "hermes_skill" / "agentbox-hermes-skills"
+INSTALLED_SKILL_DIR = HERMES_SKILLS_DIR / "agentbox-hermes-skills"
 CLI_SOURCE = REPO_ROOT / "scripts" / "agentbox-hermes"
 CLI_TARGET = HERMES_BIN_DIR / "agentbox-hermes"
 BACKGROUND_STATE_PATH = HERMES_AGENTBOX_HOME / "background_runner_state.json"
 LAST_SUMMARY_PATH = HERMES_AGENTBOX_HOME / "last_execution_summary.md"
+SKILL_DOCS = [
+    "AGENTBOX_ID_SEMANTICS.md",
+    "HERMES_CRON_PROMPT.md",
+]
+AGENTBOX_SKILL_NAMES = {
+    "agentbox-hermes-skills",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -51,6 +60,28 @@ def _write_config_lines(lines: list[str]) -> None:
     HERMES_CONFIG_PATH.write_text("\n".join(lines) + "\n")
 
 
+def _skill_frontmatter_name(skill_md: Path) -> str | None:
+    try:
+        for line in skill_md.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("name:"):
+                return stripped.split(":", 1)[1].strip().strip("'\"")
+    except OSError:
+        return None
+    return None
+
+
+def _contains_agentbox_hermes_skill(directory: Path) -> bool:
+    if not directory.exists() or not directory.is_dir():
+        return False
+    for skill_md in directory.rglob("SKILL.md"):
+        if any(part in {".git", ".github", ".hub", ".archive"} for part in skill_md.parts):
+            continue
+        if _skill_frontmatter_name(skill_md) in AGENTBOX_SKILL_NAMES:
+            return True
+    return False
+
+
 def _find_skills_block(lines: list[str]) -> tuple[int, int]:
     start = next((idx for idx, line in enumerate(lines) if line.strip() == "skills:"), -1)
     if start == -1:
@@ -65,30 +96,46 @@ def _find_skills_block(lines: list[str]) -> tuple[int, int]:
     return start, end
 
 
-def _ensure_external_dir() -> bool:
+def _remove_agentbox_external_dirs() -> bool:
     lines = _read_config_lines()
-    target = str(HERMES_SKILL_DIR.resolve())
-    if any(line.strip().lstrip("-").strip() == target for line in lines):
-        return False
+    changed = False
 
-    start, end = _find_skills_block(lines)
-    external_idx = -1
-    for idx in range(start + 1, end):
-      if lines[idx].strip() == "external_dirs:":
-        external_idx = idx
-        break
+    # Agentbox Hermes skills should be installed into ~/.hermes/skills, the same
+    # location used by normal Hermes skill installs. Keeping a source checkout in
+    # external_dirs can shadow or duplicate the installed skill.
+    deduped_lines: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("- "):
+            candidate = stripped[2:].strip()
+            try:
+                candidate_path = Path(candidate).expanduser().resolve()
+            except OSError:
+                candidate_path = Path(candidate).expanduser()
+            if _contains_agentbox_hermes_skill(candidate_path):
+                changed = True
+                continue
+        deduped_lines.append(line)
 
-    if external_idx != -1:
-        insert_at = external_idx + 1
-        while insert_at < end and (lines[insert_at].startswith("    - ") or not lines[insert_at].strip()):
-            insert_at += 1
-        lines.insert(insert_at, f"    - {target}")
-    else:
-        insertion = ["  external_dirs:", f"    - {target}", ""]
-        lines[start + 1:start + 1] = insertion
+    if changed:
+        _write_config_lines(deduped_lines)
+    return changed
 
-    _write_config_lines(lines)
-    return True
+
+def _install_skill_files() -> None:
+    if not (SOURCE_SKILL_DIR / "SKILL.md").exists():
+        raise FileNotFoundError(f"Missing Hermes skill source: {SOURCE_SKILL_DIR / 'SKILL.md'}")
+
+    if INSTALLED_SKILL_DIR.exists() or INSTALLED_SKILL_DIR.is_symlink():
+        if INSTALLED_SKILL_DIR.is_symlink() or INSTALLED_SKILL_DIR.is_file():
+            INSTALLED_SKILL_DIR.unlink()
+        else:
+            shutil.rmtree(INSTALLED_SKILL_DIR)
+
+    (INSTALLED_SKILL_DIR / "docs").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(SOURCE_SKILL_DIR / "SKILL.md", INSTALLED_SKILL_DIR / "SKILL.md")
+    for doc_name in SKILL_DOCS:
+        shutil.copy2(REPO_ROOT / "docs" / doc_name, INSTALLED_SKILL_DIR / "docs" / doc_name)
 
 
 def _ensure_state_files() -> None:
@@ -125,7 +172,7 @@ def _install_bridge_service() -> None:
 
 
 def _print_validation_steps(bin_linked: bool, bridge_service_installed: bool) -> None:
-    print(f"Hermes skill directory: {HERMES_SKILL_DIR.resolve()}")
+    print(f"Hermes skill directory: {INSTALLED_SKILL_DIR}")
     print(f"Hermes Agentbox state dir: {HERMES_AGENTBOX_HOME}")
     if bin_linked:
         print(f"CLI entry installed at: {CLI_TARGET}")
@@ -152,7 +199,8 @@ def _print_validation_steps(bin_linked: bool, bridge_service_installed: bool) ->
 def main() -> None:
     args = parse_args()
     _ensure_hermes_config()
-    changed = _ensure_external_dir()
+    removed_external_dirs = _remove_agentbox_external_dirs()
+    _install_skill_files()
     _ensure_state_files()
 
     hermes_binary = shutil.which("hermes")
@@ -164,10 +212,11 @@ def main() -> None:
     else:
         print("Warning: `hermes` binary was not found on PATH. Skills can still be installed if Hermes is configured elsewhere.")
 
-    if changed:
-        print(f"Added Hermes external skill dir to {HERMES_CONFIG_PATH}")
+    if removed_external_dirs:
+        print(f"Removed Agentbox Hermes external skill dir entries from {HERMES_CONFIG_PATH}")
     else:
-        print(f"Hermes external skill dir already present in {HERMES_CONFIG_PATH}")
+        print(f"No Agentbox Hermes external skill dir entries found in {HERMES_CONFIG_PATH}")
+    print(f"Installed Agentbox Hermes skill to {INSTALLED_SKILL_DIR}")
 
     bridge_service_installed = False
     if args.skip_bridge_service:
