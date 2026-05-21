@@ -1,9 +1,7 @@
 import crypto from "node:crypto";
-import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { promisify } from "node:util";
 
 const DEFAULT_BRIDGE_TOKEN_BYTES = 24;
 const DEFAULT_BRIDGE_SESSION_KEY = "session:agentbox-game-chat";
@@ -31,8 +29,6 @@ const DEFAULT_ALLOWED_ORIGINS = [
   "http://127.0.0.1:8090",
   "http://localhost:8090",
 ];
-
-const execFileAsync = promisify(execFile);
 
 function randomBridgeToken() {
   return crypto.randomBytes(DEFAULT_BRIDGE_TOKEN_BYTES).toString("hex");
@@ -673,15 +669,6 @@ async function fileExists(filePath) {
   }
 }
 
-async function commandOutput(command, args) {
-  try {
-    const { stdout } = await execFileAsync(command, args, { timeout: 2000 });
-    return stdout.trim();
-  } catch {
-    return "";
-  }
-}
-
 async function findExecutableOnPath(binaryName) {
   const pathEntries = String(process.env.PATH || "")
     .split(path.delimiter)
@@ -713,6 +700,11 @@ async function collectOpenClawPackageRoots() {
     if (prefix) addPackageRoot(path.join(prefix, "lib/node_modules/openclaw"));
   }
 
+  if (process.env.NVM_BIN) {
+    addPackageRoot(path.resolve(process.env.NVM_BIN, "../lib/node_modules/openclaw"));
+  }
+  addPackageRoot(path.resolve(path.dirname(process.execPath), "../lib/node_modules/openclaw"));
+
   const openclawCli = await findExecutableOnPath("openclaw");
   if (openclawCli) {
     try {
@@ -722,9 +714,6 @@ async function collectOpenClawPackageRoots() {
       // Some command shims are not normal filesystem paths.
     }
   }
-
-  addNodeModulesRoot(await commandOutput("npm", ["root", "-g"]));
-  addNodeModulesRoot(await commandOutput("pnpm", ["root", "-g"]));
 
   for (const root of [
     "/opt/homebrew/lib/node_modules/openclaw",
