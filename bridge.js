@@ -579,26 +579,30 @@ function backgroundMessageWithoutMetadata(message) {
   return (index >= 0 ? message.slice(0, index) : message).trim();
 }
 
-async function readActiveRoleForBackground(runtime) {
-  if (!runtime?.invoke) {
+function readActiveRoleForBackground(runtime) {
+  if (!runtime) {
     return { activeRole: null, ownerAddress: "", signerAddress: "" };
   }
-  const signerResult = await runtime.invoke("agentbox.signer.read", {});
-  const signerData = runtimeData(signerResult);
-  const activeResult = signerData.hasSigner ? await runtime.invoke("agentbox.roles.read_active", {}) : null;
-  const activeData = runtimeData(activeResult);
+  const signerRecord = runtime.signers?.loadRecord?.() || null;
+  const activeRole = runtime.activeRoles?.loadRecord?.() || null;
   return {
-    activeRole: activeData.activeRole || signerData.activeRole || null,
-    ownerAddress: activeData.ownerAddress || signerData.signer?.address || "",
-    signerAddress: signerData.signer?.address || "",
+    activeRole,
+    ownerAddress: activeRole?.ownerAddress || signerRecord?.address || "",
+    signerAddress: signerRecord?.address || "",
   };
 }
 
-async function buildBackgroundPrompt({ runtime, language, intervalMinutes = 30, customCronPrompt = "" }) {
+async function buildBackgroundPrompt({
+  runtime,
+  language,
+  intervalMinutes = 30,
+  customCronPrompt = "",
+  activeRoleState = null,
+} = {}) {
   const resolvedLanguage = normalizeBackgroundLanguage(language, "", "");
   const customPrompt = sanitizeCronPromptText(customCronPrompt, "");
   const template = customPrompt || await fs.readFile(backgroundTemplateUrl(), "utf8");
-  const { activeRole, ownerAddress } = await readActiveRoleForBackground(runtime);
+  const { activeRole, ownerAddress } = activeRoleState || readActiveRoleForBackground(runtime);
   const roleWallet = activeRole?.roleWallet || "<rolewallet_address>";
   const owner = activeRole?.ownerAddress || ownerAddress || "<owner_address>";
   const currentTime = new Date().toISOString();
@@ -629,9 +633,10 @@ async function buildBackgroundPrompt({ runtime, language, intervalMinutes = 30, 
   return `${hydrated.trim()}\n\n${contextBlock}\n\n${BACKGROUND_METADATA_PREFIX} ${JSON.stringify(metadata)}`;
 }
 
-async function readBackgroundCustomStrategy(runtime) {
+async function readBackgroundCustomStrategy(runtime, roleWallet = null) {
   if (!runtime?.invoke) return null;
-  const result = await runtime.invoke("agentbox.operations.read_state", {});
+  if (!roleWallet) return null;
+  const result = await runtime.invoke("agentbox.operations.read_state", roleWallet ? { role: roleWallet } : {});
   const data = runtimeData(result);
   return typeof data.customStrategy === "string" ? data.customStrategy : null;
 }
@@ -785,9 +790,9 @@ function formatBackgroundJobStatus(job) {
   };
 }
 
-async function formatBackgroundJobStatusWithOperations(runtime, job) {
+async function formatBackgroundJobStatusWithOperations(runtime, job, roleWallet = null) {
   const status = formatBackgroundJobStatus(job);
-  status.customStrategy = await readBackgroundCustomStrategy(runtime);
+  status.customStrategy = await readBackgroundCustomStrategy(runtime, roleWallet);
   return status;
 }
 
@@ -1699,7 +1704,18 @@ function createBridgeHandler(api, hub, pairingManager, streamTicketManager, rout
         writeText(res, 405, "Method Not Allowed", origin);
         return true;
       }
-      const result = await runtime.invoke("agentbox.operations.read_state", {});
+      const activeRoleState = readActiveRoleForBackground(runtime);
+      const roleWallet = activeRoleState.activeRole?.roleWallet || null;
+      if (!roleWallet) {
+        writeJson(
+          res,
+          400,
+          { ok: false, error: "missing_active_role", message: "No active role is selected." },
+          origin
+        );
+        return true;
+      }
+      const result = await runtime.invoke("agentbox.operations.read_state", { role: roleWallet });
       writeRuntimeResult(res, origin, result, formatBridgeOperationState);
       return true;
     }
@@ -1711,7 +1727,9 @@ function createBridgeHandler(api, hub, pairingManager, streamTicketManager, rout
       }
       try {
         const job = findBackgroundJob(await listCronJobs(api));
-        writeJson(res, 200, await formatBackgroundJobStatusWithOperations(runtime, job), origin);
+        const activeRoleState = readActiveRoleForBackground(runtime);
+        const roleWallet = activeRoleState.activeRole?.roleWallet || null;
+        writeJson(res, 200, await formatBackgroundJobStatusWithOperations(runtime, job, roleWallet), origin);
       } catch (error) {
         writeJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) }, origin);
       }
@@ -1738,14 +1756,15 @@ function createBridgeHandler(api, hub, pairingManager, streamTicketManager, rout
         backgroundIntervalMinutes(existingJob) || 30
       );
       try {
-        const activeRoleState = await readActiveRoleForBackground(runtime);
-        if (!activeRoleState.activeRole?.roleWallet) {
+        const activeRoleState = readActiveRoleForBackground(runtime);
+        const roleWallet = activeRoleState.activeRole?.roleWallet || null;
+        if (!roleWallet) {
           writeJson(res, 400, { ok: false, error: "missing_active_role" }, origin);
           return true;
         }
-        await runtime.invoke("agentbox.operations.update_strategy", { customStrategy });
+        await runtime.invoke("agentbox.operations.update_strategy", { role: roleWallet, customStrategy });
         if (routeName === "background-update-goal" && !existingJob) {
-          writeJson(res, 200, await formatBackgroundJobStatusWithOperations(runtime, null), origin);
+          writeJson(res, 200, await formatBackgroundJobStatusWithOperations(runtime, null, roleWallet), origin);
           return true;
         }
         const message = await buildBackgroundPrompt({
@@ -1753,6 +1772,7 @@ function createBridgeHandler(api, hub, pairingManager, streamTicketManager, rout
           language: body.language,
           intervalMinutes,
           customCronPrompt,
+          activeRoleState,
         });
         const enabled = routeName === "background-start" ? true : existingJob.enabled !== false;
         const job = await createOrUpdateBackgroundJob(api, message, { enabled, intervalMinutes });
@@ -1761,23 +1781,33 @@ function createBridgeHandler(api, hub, pairingManager, streamTicketManager, rout
             writeJson(res, 500, { ok: false, error: "background_job_unavailable" }, origin);
             return true;
           }
-          await runBackgroundJobNow(api, job.id);
+          runBackgroundJobNow(api, job.id).catch((error) => {
+            api?.logger?.warn?.(
+              `agentbox bridge: async background run-now failed: ${
+                error instanceof Error ? error.message : String(error)
+              }`
+            );
+          });
           writeJson(
             res,
             200,
-            await formatBackgroundJobStatusWithOperations(runtime, {
-              ...job,
-              enabled: true,
-              state: {
-                ...(job.state ?? {}),
-                runningAtMs: job.state?.runningAtMs ?? Date.now(),
+            await formatBackgroundJobStatusWithOperations(
+              runtime,
+              {
+                ...job,
+                enabled: true,
+                state: {
+                  ...(job.state ?? {}),
+                  runningAtMs: job.state?.runningAtMs ?? Date.now(),
+                },
               },
-            }),
+              roleWallet
+            ),
             origin
           );
           return true;
         }
-        writeJson(res, 200, await formatBackgroundJobStatusWithOperations(runtime, job), origin);
+        writeJson(res, 200, await formatBackgroundJobStatusWithOperations(runtime, job, roleWallet), origin);
       } catch (error) {
         writeJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) }, origin);
       }
@@ -1796,7 +1826,9 @@ function createBridgeHandler(api, hub, pairingManager, streamTicketManager, rout
           return true;
         }
         const nextJob = await setBackgroundJobEnabled(api, job.id, false);
-        writeJson(res, 200, await formatBackgroundJobStatusWithOperations(runtime, nextJob), origin);
+        const activeRoleState = readActiveRoleForBackground(runtime);
+        const roleWallet = activeRoleState.activeRole?.roleWallet || null;
+        writeJson(res, 200, await formatBackgroundJobStatusWithOperations(runtime, nextJob, roleWallet), origin);
       } catch (error) {
         writeJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) }, origin);
       }

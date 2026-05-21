@@ -2,7 +2,7 @@
   "id": "agentbox-skills",
   "name": "Agentbox Skills",
   "description": "OpenClaw plugin that exposes Agentbox gameplay tools and a local bridge for Agentbox web features.",
-  "version": "0.1.1",
+  "version": "0.1.3",
   "activation": {
     "onStartup": true
   },
