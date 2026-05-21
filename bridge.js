@@ -1,7 +1,9 @@
 import crypto from "node:crypto";
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 
 const DEFAULT_BRIDGE_TOKEN_BYTES = 24;
 const DEFAULT_BRIDGE_SESSION_KEY = "session:agentbox-game-chat";
@@ -29,6 +31,8 @@ const DEFAULT_ALLOWED_ORIGINS = [
   "http://127.0.0.1:8090",
   "http://localhost:8090",
 ];
+
+const execFileAsync = promisify(execFile);
 
 function randomBridgeToken() {
   return crypto.randomBytes(DEFAULT_BRIDGE_TOKEN_BYTES).toString("hex");
@@ -660,6 +664,85 @@ function resolveCronService(api) {
 
 let gatewayCronCallerPromise = null;
 
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function commandOutput(command, args) {
+  try {
+    const { stdout } = await execFileAsync(command, args, { timeout: 2000 });
+    return stdout.trim();
+  } catch {
+    return "";
+  }
+}
+
+async function findExecutableOnPath(binaryName) {
+  const pathEntries = String(process.env.PATH || "")
+    .split(path.delimiter)
+    .filter(Boolean);
+  for (const entry of pathEntries) {
+    const candidate = path.join(entry, binaryName);
+    if (await fileExists(candidate)) return candidate;
+  }
+  return "";
+}
+
+async function collectOpenClawPackageRoots() {
+  const roots = new Set();
+  const addPackageRoot = (value) => {
+    if (typeof value !== "string" || !value.trim()) return;
+    roots.add(path.resolve(value.trim()));
+  };
+  const addNodeModulesRoot = (value) => {
+    if (typeof value !== "string" || !value.trim()) return;
+    addPackageRoot(path.join(value.trim(), "openclaw"));
+  };
+
+  const openclawEntrypoint = process.argv.find(
+    (arg) => typeof arg === "string" && path.basename(arg) === "openclaw.mjs"
+  );
+  if (openclawEntrypoint) addPackageRoot(path.dirname(openclawEntrypoint));
+
+  for (const prefix of [process.env.npm_config_prefix, process.env.PREFIX]) {
+    if (prefix) addPackageRoot(path.join(prefix, "lib/node_modules/openclaw"));
+  }
+
+  const openclawCli = await findExecutableOnPath("openclaw");
+  if (openclawCli) {
+    try {
+      const realCli = await fs.realpath(openclawCli);
+      if (path.basename(realCli) === "openclaw.mjs") addPackageRoot(path.dirname(realCli));
+    } catch {
+      // Some command shims are not normal filesystem paths.
+    }
+  }
+
+  addNodeModulesRoot(await commandOutput("npm", ["root", "-g"]));
+  addNodeModulesRoot(await commandOutput("pnpm", ["root", "-g"]));
+
+  for (const root of [
+    "/opt/homebrew/lib/node_modules/openclaw",
+    "/usr/local/lib/node_modules/openclaw",
+    "/usr/lib/node_modules/openclaw",
+  ]) {
+    addPackageRoot(root);
+  }
+
+  return [...roots];
+}
+
+async function importGatewayCallerFromFile(candidate) {
+  if (!(await fileExists(candidate))) return null;
+  const mod = await import(pathToFileURL(candidate).href);
+  return typeof mod.callGatewayTool === "function" ? mod.callGatewayTool : null;
+}
+
 async function loadGatewayCronCaller() {
   if (!gatewayCronCallerPromise) {
     gatewayCronCallerPromise = (async () => {
@@ -669,18 +752,12 @@ async function loadGatewayCronCaller() {
       } catch {
         // External plugins may live outside OpenClaw's package tree, so bare resolution can fail.
       }
-      const candidates = [];
-      const openclawEntrypoint = process.argv.find(
-        (arg) => typeof arg === "string" && path.basename(arg) === "openclaw.mjs"
-      );
-      if (openclawEntrypoint) {
-        candidates.push(path.join(path.dirname(openclawEntrypoint), "dist/plugin-sdk/agent-harness.js"));
-      }
-      candidates.push(path.resolve(path.dirname(process.execPath), "../lib/node_modules/openclaw/dist/plugin-sdk/agent-harness.js"));
+      const roots = await collectOpenClawPackageRoots();
+      const candidates = roots.map((root) => path.join(root, "dist/plugin-sdk/agent-harness.js"));
       for (const candidate of candidates) {
         try {
-          const mod = await import(pathToFileURL(candidate).href);
-          if (typeof mod.callGatewayTool === "function") return mod.callGatewayTool;
+          const callGatewayTool = await importGatewayCallerFromFile(candidate);
+          if (callGatewayTool) return callGatewayTool;
         } catch {
           // Try the next known install shape.
         }
