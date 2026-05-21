@@ -18,6 +18,8 @@ const MAX_BACKGROUND_INTERVAL_MINUTES = 24 * 60;
 const CRON_RPC_TIMEOUT_MS = 8000;
 const BACKGROUND_METADATA_PREFIX = "AGENTBOX_BACKGROUND_CONTROL_JSON:";
 const DEFAULT_ALLOWED_ORIGINS = [
+  "https://agentbox.world",
+  "https://www.agentbox.world",
   "http://127.0.0.1:5173",
   "http://localhost:5173",
   "http://127.0.0.1:8080",
@@ -309,6 +311,7 @@ function createCorsHeaders(origin) {
     "Access-Control-Allow-Headers": "Authorization, Content-Type",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
     "Access-Control-Allow-Credentials": "false",
+    "Access-Control-Allow-Private-Network": "true",
     Vary: "Origin",
   };
 }
