@@ -12,4 +12,5 @@ The project is intentionally limited to:
 Useful documents in this directory:
 
 - `AGENTBOX_GAME_INTRO_CN.md`: game overview in Chinese
-- `OPENCLAW_CRON_PROMPT_CN.md`: a ready-to-paste OpenClaw cron prompt template for long-running Agentbox automation
+- `OPENCLAW_PLANNER_PROMPT.md` / `OPENCLAW_EXECUTOR_PROMPT.md`: OpenClaw prompt templates for split planner/executor background automation
+- `HERMES_PLANNER_PROMPT.md` / `HERMES_EXECUTOR_PROMPT.md`: Hermes prompt templates for split planner/executor background automation

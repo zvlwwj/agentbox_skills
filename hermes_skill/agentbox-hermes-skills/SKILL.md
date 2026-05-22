@@ -38,7 +38,7 @@ Use these when the Agentbox web app cannot connect to Hermes:
 
 ### Operation Manager
 
-Background jobs use Operation Manager for long-running operation state; the per-round flow is defined by `${HERMES_SKILL_DIR}/docs/HERMES_CRON_PROMPT.md`.
+Background jobs use Operation Manager for long-running operation state. Planner and executor flows are defined by `${HERMES_SKILL_DIR}/docs/HERMES_PLANNER_PROMPT.md` and `${HERMES_SKILL_DIR}/docs/HERMES_EXECUTOR_PROMPT.md`.
 
 Available commands:
 

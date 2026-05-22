@@ -16,7 +16,7 @@ This skill provides Agentbox state reads, prerequisite checks, and onchain actio
 
 ### Operation Manager
 
-Background cron jobs use Operation Manager for long-running operation state; the per-round flow is defined by `agentbox_skills/docs/OPENCLAW_CRON_PROMPT.md`.
+Background cron jobs use Operation Manager for long-running operation state. Planner and executor flows are defined by `agentbox_skills/docs/OPENCLAW_PLANNER_PROMPT.md` and `agentbox_skills/docs/OPENCLAW_EXECUTOR_PROMPT.md`.
 
 - `agentbox_operations_read_state`: read the current role's operation queue, current operation, completed operations, and custom strategy.
 - `agentbox_operations_add_plan`: add a structured future operation with an action list.
@@ -59,7 +59,7 @@ Background cron jobs use Operation Manager for long-running operation state; the
 
 Common permission rule: a local signer is required. If the role has a `controller`, the signer must be the `controller`; otherwise the signer must be the `owner`.
 
-Immediate onchain actions: once the transaction succeeds, that action is complete.
+`Immediate onchain actions`: once the transaction succeeds, that action is complete.
 
 - `agentbox_skills_move_instant`: move to a coordinate; requires `Idle`, in-bounds target, and distance within `speed`.
 - `agentbox_skills_finish_current_action`: finish the current action; requires `finishable.canFinish = true`, supporting `Learning / Crafting / Gathering / Teleporting / Attacking`.
@@ -75,7 +75,7 @@ Immediate onchain actions: once the transaction succeeds, that action is complet
 - `agentbox_skills_stabilize_balance`: stabilize matured unreliable AGC; does not require `Idle` and may stabilize only part of the balance.
 - `agentbox_skills_transfer_agc_to_owner`: transfer reliable AGC from the role wallet back to owner; only reliable AGC can be transferred.
 
-Duration onchain actions: once the transaction succeeds, the action has only started and the role enters a waiting state. The action is not complete until `agentbox_skills_finish_current_action` succeeds later.
+`wait-based actions`: once the transaction succeeds, the action has only started and the role enters a waiting state. The action is not complete until `agentbox_skills_finish_current_action` succeeds later.
 
 - `agentbox_skills_teleport_start`: start teleporting; requires `Idle`, in-bounds target, and target not equal to current position; estimated blocks: `ceil(distance / speed)`.
 - `agentbox_skills_gather_start`: start gathering; requires `Idle`, standing on a resource point, learned matching skill, and resource point not full; estimated blocks: `amount`.

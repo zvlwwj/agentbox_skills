@@ -24,8 +24,10 @@ const DEFAULT_PAIRING_TTL_MS = 2 * 60 * 1000;
 const DEFAULT_STREAM_TICKET_TTL_MS = 30 * 1000;
 const MAX_JSON_BODY_BYTES = 64 * 1024;
 const SPAWN_COMMAND_TIMEOUT_MS = 10000;
-const AGENTBOX_BACKGROUND_JOB_NAME = "agentbox-background-runner";
-const AGENTBOX_BACKGROUND_DEFAULT_INTERVAL_MINUTES = 30;
+const AGENTBOX_BACKGROUND_PLANNER_JOB_NAME = "agentbox-background-planner";
+const AGENTBOX_BACKGROUND_EXECUTOR_JOB_NAME = "agentbox-background-executor";
+const AGENTBOX_BACKGROUND_PLANNER_DEFAULT_INTERVAL_MINUTES = 30;
+const AGENTBOX_BACKGROUND_EXECUTOR_DEFAULT_INTERVAL_MINUTES = 10;
 const DEFAULT_ALLOWED_ORIGINS = [
   "https://agentbox.world",
   "https://www.agentbox.world",
@@ -521,65 +523,109 @@ async function listHermesCronJobs() {
   return parseHermesCronList(result.stdout);
 }
 
-async function findBackgroundJob() {
-  const jobs = await listHermesCronJobs();
-  return jobs.find((job) => job.name === AGENTBOX_BACKGROUND_JOB_NAME) || null;
+function backgroundJobSpec(kind) {
+  if (kind === "planner") {
+    return {
+      kind,
+      name: AGENTBOX_BACKGROUND_PLANNER_JOB_NAME,
+      sessionKey: "session:agentbox-background-planner",
+      defaultIntervalMinutes: AGENTBOX_BACKGROUND_PLANNER_DEFAULT_INTERVAL_MINUTES,
+      templateName: "HERMES_PLANNER_PROMPT.md",
+    };
+  }
+  return {
+    kind: "executor",
+    name: AGENTBOX_BACKGROUND_EXECUTOR_JOB_NAME,
+    sessionKey: "session:agentbox-background-executor",
+    defaultIntervalMinutes: AGENTBOX_BACKGROUND_EXECUTOR_DEFAULT_INTERVAL_MINUTES,
+    templateName: "HERMES_EXECUTOR_PROMPT.md",
+  };
 }
 
-function normalizeIntervalMinutes(value, fallback = AGENTBOX_BACKGROUND_DEFAULT_INTERVAL_MINUTES) {
+async function findBackgroundJob(kind) {
+  const spec = backgroundJobSpec(kind);
+  const jobs = await listHermesCronJobs();
+  return jobs.find((job) => job.name === spec.name) || null;
+}
+
+async function findBackgroundJobs() {
+  const jobs = await listHermesCronJobs();
+  return {
+    planner: jobs.find((job) => job.name === AGENTBOX_BACKGROUND_PLANNER_JOB_NAME) || null,
+    executor: jobs.find((job) => job.name === AGENTBOX_BACKGROUND_EXECUTOR_JOB_NAME) || null,
+  };
+}
+
+function normalizeIntervalMinutes(value, fallback = AGENTBOX_BACKGROUND_PLANNER_DEFAULT_INTERVAL_MINUTES) {
   const numeric = Number(value ?? fallback);
   if (!Number.isFinite(numeric)) return fallback;
   return Math.min(1440, Math.max(1, Math.round(numeric)));
 }
 
-async function formatBackgroundJobStatus(job, customStrategy = "") {
+function formatBackgroundJobItem(job, kind) {
+  const spec = backgroundJobSpec(kind);
   if (!job) {
     return {
-      ok: true,
       exists: false,
       enabled: false,
       jobId: null,
-      name: AGENTBOX_BACKGROUND_JOB_NAME,
+      name: spec.name,
       schedule: null,
       intervalMinutes: null,
-      sessionKey: "session:agentbox-background-runner",
-      customStrategy,
-      customCronPrompt: null,
-      currentCronPrompt: null,
-      usingCustomCronPrompt: false,
+      sessionKey: spec.sessionKey,
       lastRunAt: null,
       lastRunStatus: null,
+      runningAt: null,
     };
   }
   const intervalMatch = String(job.schedule || "").match(/(?:every|once in)\s+(\d+)m/i);
-  const intervalMinutes = intervalMatch ? Number(intervalMatch[1]) : AGENTBOX_BACKGROUND_DEFAULT_INTERVAL_MINUTES;
-  const currentCronPrompt = await buildHermesBackgroundPrompt(intervalMinutes);
+  const intervalMinutes = intervalMatch ? Number(intervalMatch[1]) : spec.defaultIntervalMinutes;
   return {
-    ok: true,
     exists: true,
     enabled: job.enabled !== false,
     jobId: job.id || null,
-    name: job.name || AGENTBOX_BACKGROUND_JOB_NAME,
+    name: job.name || spec.name,
     schedule: job.schedule || null,
     intervalMinutes,
-    sessionKey: "session:agentbox-background-runner",
-    customStrategy,
-    customCronPrompt: null,
-    currentCronPrompt,
-    usingCustomCronPrompt: false,
+    sessionKey: spec.sessionKey,
     lastRunAt: job.state?.lastRunAt ? Date.parse(job.state.lastRunAt) || null : null,
     lastRunStatus: job.state?.lastRunStatus || null,
+    runningAt: null,
   };
 }
 
-async function readCustomStrategy(runtime) {
-  const result = await runtime.invoke("agentbox.operations.read_state", {});
+function combinedBackgroundState(jobs) {
+  const plannerEnabled = Boolean(jobs.planner?.enabled !== false && jobs.planner);
+  const executorEnabled = Boolean(jobs.executor?.enabled !== false && jobs.executor);
+  if (!jobs.planner && !jobs.executor) return "missing";
+  if (plannerEnabled && executorEnabled) return "running";
+  if (!plannerEnabled && !executorEnabled) return "stopped";
+  return "partial";
+}
+
+async function formatBackgroundStatus(runtime, jobs, customStrategy = "") {
+  return {
+    ok: true,
+    combinedState: combinedBackgroundState(jobs),
+    planner: formatBackgroundJobItem(jobs.planner, "planner"),
+    executor: formatBackgroundJobItem(jobs.executor, "executor"),
+    customStrategy,
+  };
+}
+
+async function readCustomStrategy(runtime, roleWallet = null) {
+  const result = await runtime.invoke("agentbox.operations.read_state", roleWallet ? { role: roleWallet } : {});
   return runtimeData(result).customStrategy || runtimeData(result).data?.customStrategy || "";
 }
 
-async function buildHermesBackgroundPrompt(intervalMinutes = 30) {
-  const templatePath = path.join(PLUGIN_ROOT, "docs", "HERMES_CRON_PROMPT.md");
-  const cronIntervalMinutes = normalizeIntervalMinutes(intervalMinutes);
+function readLocalActiveRole(runtime) {
+  return runtime?.activeRoles?.loadRecord?.() || null;
+}
+
+async function buildHermesBackgroundPrompt(kind, intervalMinutes) {
+  const spec = backgroundJobSpec(kind);
+  const templatePath = path.join(PLUGIN_ROOT, "docs", spec.templateName);
+  const cronIntervalMinutes = normalizeIntervalMinutes(intervalMinutes, spec.defaultIntervalMinutes);
   const cronIntervalSeconds = cronIntervalMinutes * 60;
   try {
     const template = await fsp.readFile(templatePath, "utf8");
@@ -588,20 +634,22 @@ async function buildHermesBackgroundPrompt(intervalMinutes = 30) {
       .replaceAll("<cron_interval_seconds>", String(cronIntervalSeconds))
       .trim();
   } catch {
-    return "Run Agentbox background gameplay for the active role. Read Operation Manager state first and execute one safe next action.";
+    return kind === "planner"
+      ? "Run Agentbox background planner. Read Operation Manager and create or update future plans without gameplay writes."
+      : "Run Agentbox background executor. Execute one safe next Operation Manager action.";
   }
 }
 
-function normalizeCustomCronPrompt(value) {
-  return typeof value === "string" ? value.trim().slice(0, 20000) : "";
-}
-
-async function createOrUpdateBackgroundJob(runtime, body = {}) {
-  const intervalMinutes = normalizeIntervalMinutes(body.intervalMinutes);
-  const prompt = normalizeCustomCronPrompt(body.customCronPrompt) || await buildHermesBackgroundPrompt(intervalMinutes);
-  const existing = await findBackgroundJob();
+async function createOrUpdateBackgroundJob(runtime, kind, body = {}) {
+  const spec = backgroundJobSpec(kind);
+  const intervalMinutes = normalizeIntervalMinutes(body.intervalMinutes, spec.defaultIntervalMinutes);
+  const prompt = await buildHermesBackgroundPrompt(kind, intervalMinutes);
+  const existing = await findBackgroundJob(kind);
   if (typeof body.customStrategy === "string") {
-    await runtime.invoke("agentbox.operations.update_strategy", { customStrategy: body.customStrategy });
+    await runtime.invoke("agentbox.operations.update_strategy", {
+      ...(body.roleWallet ? { role: body.roleWallet } : {}),
+      customStrategy: body.customStrategy,
+    });
   }
   if (existing?.id) {
     const editResult = await spawnCommand(HERMES_CLI, [
@@ -613,7 +661,7 @@ async function createOrUpdateBackgroundJob(runtime, body = {}) {
       "--prompt",
       prompt,
       "--name",
-      AGENTBOX_BACKGROUND_JOB_NAME,
+      spec.name,
       "--deliver",
       "local",
       "--repeat",
@@ -624,7 +672,7 @@ async function createOrUpdateBackgroundJob(runtime, body = {}) {
     if (!editResult.ok) throw new Error(editResult.stderr || editResult.stdout || "Hermes cron edit failed");
     const resumeResult = await spawnCommand(HERMES_CLI, ["cron", "resume", existing.id]);
     if (!resumeResult.ok) throw new Error(resumeResult.stderr || resumeResult.stdout || "Hermes cron resume failed");
-    return findBackgroundJob();
+    return findBackgroundJob(kind);
   }
   const createResult = await spawnCommand(HERMES_CLI, [
     "cron",
@@ -632,7 +680,7 @@ async function createOrUpdateBackgroundJob(runtime, body = {}) {
     `every ${intervalMinutes}m`,
     prompt,
     "--name",
-    AGENTBOX_BACKGROUND_JOB_NAME,
+    spec.name,
     "--deliver",
     "local",
     "--repeat",
@@ -641,7 +689,7 @@ async function createOrUpdateBackgroundJob(runtime, body = {}) {
     "agentbox-hermes-skills",
   ]);
   if (!createResult.ok) throw new Error(createResult.stderr || createResult.stdout || "Hermes cron create failed");
-  return findBackgroundJob();
+  return findBackgroundJob(kind);
 }
 
 class PairingManager {
@@ -1031,42 +1079,108 @@ async function main() {
         return;
       }
       if (route === "/operations/state") {
-        writeRuntimeResult(res, origin, latestConfig, await runtime.invoke("agentbox.operations.read_state", {}), formatBridgeOperationState);
+        const activeRole = readLocalActiveRole(runtime);
+        if (!activeRole?.roleWallet) {
+          writeJson(res, 400, { ok: false, error: "missing_active_role", message: "No active role is selected." }, origin, latestConfig);
+          return;
+        }
+        writeRuntimeResult(
+          res,
+          origin,
+          latestConfig,
+          await runtime.invoke("agentbox.operations.read_state", { role: activeRole.roleWallet }),
+          formatBridgeOperationState
+        );
         return;
       }
       if (route === "/background/status") {
-        writeJson(res, 200, await formatBackgroundJobStatus(await findBackgroundJob(), await readCustomStrategy(runtime)), origin, latestConfig);
+        const activeRole = readLocalActiveRole(runtime);
+        const roleWallet = activeRole?.roleWallet || null;
+        writeJson(
+          res,
+          200,
+          await formatBackgroundStatus(runtime, await findBackgroundJobs(), await readCustomStrategy(runtime, roleWallet)),
+          origin,
+          latestConfig
+        );
         return;
       }
       if (route === "/background/start" || route === "/background/update-goal") {
         const body = await readJsonBody(req);
+        const activeRole = readLocalActiveRole(runtime);
+        const roleWallet = activeRole?.roleWallet || null;
+        if (!roleWallet) {
+          writeJson(res, 400, { ok: false, error: "missing_active_role", message: "No active role is selected." }, origin, latestConfig);
+          return;
+        }
+        if (typeof body.customStrategy === "string") {
+          await runtime.invoke("agentbox.operations.update_strategy", { role: roleWallet, customStrategy: body.customStrategy });
+        }
         if (route === "/background/update-goal") {
-          if (typeof body.customStrategy === "string") {
-            await runtime.invoke("agentbox.operations.update_strategy", { customStrategy: body.customStrategy });
-          }
-          const existing = await findBackgroundJob();
-          if (!existing) {
-            writeJson(res, 200, await formatBackgroundJobStatus(null, await readCustomStrategy(runtime)), origin, latestConfig);
-            return;
-          }
+          writeJson(
+            res,
+            200,
+            await formatBackgroundStatus(runtime, await findBackgroundJobs(), await readCustomStrategy(runtime, roleWallet)),
+            origin,
+            latestConfig
+          );
+          return;
         }
-        const job = await createOrUpdateBackgroundJob(runtime, body);
-        if (route === "/background/start" && job?.id) {
-          const runResult = await spawnCommand(HERMES_CLI, ["cron", "run", job.id]);
-          if (!runResult.ok) throw new Error(runResult.stderr || runResult.stdout || "Hermes cron run failed");
+        const existingJobs = await findBackgroundJobs();
+        const plannerIntervalMinutes = normalizeIntervalMinutes(
+          body.plannerIntervalMinutes ?? body.intervalMinutes,
+          formatBackgroundJobItem(existingJobs.planner, "planner").intervalMinutes ||
+            AGENTBOX_BACKGROUND_PLANNER_DEFAULT_INTERVAL_MINUTES
+        );
+        const executorIntervalMinutes = normalizeIntervalMinutes(
+          body.executorIntervalMinutes ?? body.intervalMinutes,
+          formatBackgroundJobItem(existingJobs.executor, "executor").intervalMinutes ||
+            AGENTBOX_BACKGROUND_EXECUTOR_DEFAULT_INTERVAL_MINUTES
+        );
+        const plannerJob = await createOrUpdateBackgroundJob(runtime, "planner", {
+          intervalMinutes: plannerIntervalMinutes,
+          roleWallet,
+        });
+        const executorJob = await createOrUpdateBackgroundJob(runtime, "executor", {
+          intervalMinutes: executorIntervalMinutes,
+          roleWallet,
+        });
+        if (plannerJob?.id) {
+          void spawnCommand(HERMES_CLI, ["cron", "run", plannerJob.id])
+            .then(() => (executorJob?.id ? spawnCommand(HERMES_CLI, ["cron", "run", executorJob.id]) : null))
+            .catch((error) => {
+              console.warn(`Agentbox Hermes bridge async background run failed: ${error instanceof Error ? error.message : String(error)}`);
+            });
         }
-        writeJson(res, 200, await formatBackgroundJobStatus(await findBackgroundJob(), await readCustomStrategy(runtime)), origin, latestConfig);
+        writeJson(
+          res,
+          200,
+          await formatBackgroundStatus(
+            runtime,
+            { planner: plannerJob, executor: executorJob },
+            await readCustomStrategy(runtime, roleWallet)
+          ),
+          origin,
+          latestConfig
+        );
         return;
       }
       if (route === "/background/stop") {
-        const job = await findBackgroundJob();
-        if (!job?.id) {
-          writeJson(res, 404, { ok: false, error: "background_job_missing" }, origin, latestConfig);
-          return;
+        const jobs = await findBackgroundJobs();
+        for (const job of [jobs.planner, jobs.executor]) {
+          if (!job?.id) continue;
+          const pauseResult = await spawnCommand(HERMES_CLI, ["cron", "pause", job.id]);
+          if (!pauseResult.ok) throw new Error(pauseResult.stderr || pauseResult.stdout || "Hermes cron pause failed");
         }
-        const pauseResult = await spawnCommand(HERMES_CLI, ["cron", "pause", job.id]);
-        if (!pauseResult.ok) throw new Error(pauseResult.stderr || pauseResult.stdout || "Hermes cron pause failed");
-        writeJson(res, 200, await formatBackgroundJobStatus(await findBackgroundJob(), await readCustomStrategy(runtime)), origin, latestConfig);
+        const activeRole = readLocalActiveRole(runtime);
+        const roleWallet = activeRole?.roleWallet || null;
+        writeJson(
+          res,
+          200,
+          await formatBackgroundStatus(runtime, await findBackgroundJobs(), await readCustomStrategy(runtime, roleWallet)),
+          origin,
+          latestConfig
+        );
         return;
       }
       if (route === "/send") {

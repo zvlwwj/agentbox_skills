@@ -9,10 +9,12 @@ const DEFAULT_SSE_HEARTBEAT_MS = 15000;
 const DEFAULT_PAIRING_TTL_MS = 2 * 60 * 1000;
 const DEFAULT_STREAM_TICKET_TTL_MS = 30 * 1000;
 const MAX_JSON_BODY_BYTES = 64 * 1024;
-const AGENTBOX_BACKGROUND_JOB_NAME = "agentbox-background-runner";
-const AGENTBOX_BACKGROUND_SESSION_TARGET = "session:agentbox-background-runner";
-const AGENTBOX_BACKGROUND_EVERY = "30m";
-const AGENTBOX_BACKGROUND_EVERY_MS = 30 * 60 * 1000;
+const AGENTBOX_BACKGROUND_PLANNER_JOB_NAME = "agentbox-background-planner";
+const AGENTBOX_BACKGROUND_EXECUTOR_JOB_NAME = "agentbox-background-executor";
+const AGENTBOX_BACKGROUND_PLANNER_SESSION_TARGET = "session:agentbox-background-planner";
+const AGENTBOX_BACKGROUND_EXECUTOR_SESSION_TARGET = "session:agentbox-background-executor";
+const AGENTBOX_BACKGROUND_PLANNER_DEFAULT_INTERVAL_MINUTES = 30;
+const AGENTBOX_BACKGROUND_EXECUTOR_DEFAULT_INTERVAL_MINUTES = 10;
 const MIN_BACKGROUND_INTERVAL_MINUTES = 1;
 const MAX_BACKGROUND_INTERVAL_MINUTES = 24 * 60;
 const CRON_RPC_TIMEOUT_MS = 8000;
@@ -529,6 +531,10 @@ function formatBridgeOperationState(result) {
     completedOperations: Array.isArray(state.completedOperations) ? state.completedOperations : [],
     customStrategy: typeof state.customStrategy === "string" ? state.customStrategy : "",
     customStrategyUpdatedAt: state.customStrategyUpdatedAt ?? null,
+    plannerUpdatedAt: state.plannerUpdatedAt ?? null,
+    executorUpdatedAt: state.executorUpdatedAt ?? null,
+    lastPlannerResult: state.lastPlannerResult ?? null,
+    lastExecutorResult: state.lastExecutorResult ?? null,
     updatedAt: state.updatedAt ?? null,
   };
 }
@@ -536,11 +542,6 @@ function formatBridgeOperationState(result) {
 function sanitizeBackgroundText(value, fallback = "") {
   if (typeof value !== "string") return fallback;
   return value.trim().slice(0, 4000);
-}
-
-function sanitizeCronPromptText(value, fallback = "") {
-  if (typeof value !== "string") return fallback;
-  return value.trim().slice(0, 20000);
 }
 
 function normalizeBackgroundIntervalMinutes(value, fallback = 30) {
@@ -555,8 +556,11 @@ function normalizeBackgroundLanguage(value, ...textHints) {
   return /[\u3400-\u9fff]/.test(joined) ? "zh" : "en";
 }
 
-function backgroundTemplateUrl() {
-  return new URL("./docs/OPENCLAW_CRON_PROMPT.md", import.meta.url);
+function backgroundTemplateUrl(kind) {
+  return new URL(
+    kind === "planner" ? "./docs/OPENCLAW_PLANNER_PROMPT.md" : "./docs/OPENCLAW_EXECUTOR_PROMPT.md",
+    import.meta.url
+  );
 }
 
 function backgroundMetadataFromMessage(message) {
@@ -594,19 +598,23 @@ function readActiveRoleForBackground(runtime) {
 
 async function buildBackgroundPrompt({
   runtime,
+  kind = "executor",
   language,
-  intervalMinutes = 30,
-  customCronPrompt = "",
+  intervalMinutes,
   activeRoleState = null,
 } = {}) {
   const resolvedLanguage = normalizeBackgroundLanguage(language, "", "");
-  const customPrompt = sanitizeCronPromptText(customCronPrompt, "");
-  const template = customPrompt || await fs.readFile(backgroundTemplateUrl(), "utf8");
+  const template = await fs.readFile(backgroundTemplateUrl(kind), "utf8");
   const { activeRole, ownerAddress } = activeRoleState || readActiveRoleForBackground(runtime);
   const roleWallet = activeRole?.roleWallet || "<rolewallet_address>";
   const owner = activeRole?.ownerAddress || ownerAddress || "<owner_address>";
   const currentTime = new Date().toISOString();
-  const cronIntervalMinutes = normalizeBackgroundIntervalMinutes(intervalMinutes, 30);
+  const cronIntervalMinutes = normalizeBackgroundIntervalMinutes(
+    intervalMinutes,
+    kind === "planner"
+      ? AGENTBOX_BACKGROUND_PLANNER_DEFAULT_INTERVAL_MINUTES
+      : AGENTBOX_BACKGROUND_EXECUTOR_DEFAULT_INTERVAL_MINUTES
+  );
   const cronIntervalSeconds = cronIntervalMinutes * 60;
   const contextBlock = [
     "## Custom Strategy",
@@ -616,12 +624,12 @@ async function buildBackgroundPrompt({
     "- Use the user's preferred language for user-facing output.",
   ].join("\n");
   const metadata = {
+    kind,
     language: resolvedLanguage,
     roleWallet,
     owner,
     cronIntervalMinutes,
     cronIntervalSeconds,
-    customCronPrompt: Boolean(customPrompt),
     updatedAt: currentTime,
   };
   const hydrated = template
@@ -789,17 +797,43 @@ async function listCronJobs(api) {
   }
 }
 
-function findBackgroundJob(jobs) {
+function backgroundJobSpec(kind) {
+  if (kind === "planner") {
+    return {
+      kind,
+      name: AGENTBOX_BACKGROUND_PLANNER_JOB_NAME,
+      sessionTarget: AGENTBOX_BACKGROUND_PLANNER_SESSION_TARGET,
+      defaultIntervalMinutes: AGENTBOX_BACKGROUND_PLANNER_DEFAULT_INTERVAL_MINUTES,
+      description: "Agentbox background planner managed by the Agentbox local bridge",
+    };
+  }
+  return {
+    kind: "executor",
+    name: AGENTBOX_BACKGROUND_EXECUTOR_JOB_NAME,
+    sessionTarget: AGENTBOX_BACKGROUND_EXECUTOR_SESSION_TARGET,
+    defaultIntervalMinutes: AGENTBOX_BACKGROUND_EXECUTOR_DEFAULT_INTERVAL_MINUTES,
+    description: "Agentbox background executor managed by the Agentbox local bridge",
+  };
+}
+
+function findBackgroundJob(jobs, kind) {
+  const spec = backgroundJobSpec(kind);
   return (Array.isArray(jobs) ? jobs : []).find(
-    (job) => job?.name === AGENTBOX_BACKGROUND_JOB_NAME || job?.sessionTarget === AGENTBOX_BACKGROUND_SESSION_TARGET
+    (job) => job?.name === spec.name || job?.sessionTarget === spec.sessionTarget
   );
+}
+
+function findBackgroundJobs(jobs) {
+  return {
+    planner: findBackgroundJob(jobs, "planner") || null,
+    executor: findBackgroundJob(jobs, "executor") || null,
+  };
 }
 
 function backgroundScheduleLabel(job) {
   if (!job?.schedule) return null;
   if (job.schedule.kind === "every") {
     const ms = Number(job.schedule.everyMs || 0);
-    if (ms === AGENTBOX_BACKGROUND_EVERY_MS) return AGENTBOX_BACKGROUND_EVERY;
     if (ms > 0) return `${Math.round(ms / 60000)}m`;
   }
   if (job.schedule.kind === "cron") return job.schedule.expr || "cron";
@@ -814,60 +848,64 @@ function backgroundIntervalMinutes(job) {
   return Math.round(ms / 60000);
 }
 
-function formatBackgroundJobStatus(job) {
+function formatBackgroundJobItem(job, kind) {
+  const spec = backgroundJobSpec(kind);
   if (!job) {
     return {
-      ok: true,
       exists: false,
       enabled: false,
       jobId: null,
-      name: AGENTBOX_BACKGROUND_JOB_NAME,
+      name: spec.name,
       schedule: null,
       intervalMinutes: null,
-      sessionKey: AGENTBOX_BACKGROUND_SESSION_TARGET,
-      customStrategy: null,
-      customCronPrompt: null,
-      currentCronPrompt: null,
-      usingCustomCronPrompt: false,
+      sessionKey: spec.sessionTarget,
       lastRunAt: null,
       lastRunStatus: null,
+      runningAt: null,
     };
   }
-  const metadata = backgroundMetadataFromMessage(job.payload?.message);
-  const usingCustomCronPrompt = metadata.customCronPrompt === true;
-  const currentCronPrompt = backgroundMessageWithoutMetadata(job.payload?.message);
   return {
-    ok: true,
     exists: true,
     enabled: job.enabled !== false,
     jobId: job.id || null,
-    name: job.name || AGENTBOX_BACKGROUND_JOB_NAME,
+    name: job.name || spec.name,
     schedule: backgroundScheduleLabel(job),
     intervalMinutes: backgroundIntervalMinutes(job),
-    sessionKey: job.sessionTarget || AGENTBOX_BACKGROUND_SESSION_TARGET,
-    customStrategy: null,
-    customCronPrompt: usingCustomCronPrompt ? currentCronPrompt : null,
-    currentCronPrompt,
-    usingCustomCronPrompt,
-    language: metadata.language === "zh" || metadata.language === "en" ? metadata.language : null,
+    sessionKey: job.sessionTarget || spec.sessionTarget,
     lastRunAt: Number.isFinite(job.state?.lastRunAtMs) ? job.state.lastRunAtMs : null,
     lastRunStatus: job.state?.lastRunStatus || job.state?.lastStatus || null,
     runningAt: Number.isFinite(job.state?.runningAtMs) ? job.state.runningAtMs : null,
   };
 }
 
-async function formatBackgroundJobStatusWithOperations(runtime, job, roleWallet = null) {
-  const status = formatBackgroundJobStatus(job);
+function combinedBackgroundState(jobs) {
+  const plannerEnabled = Boolean(jobs.planner?.enabled !== false && jobs.planner);
+  const executorEnabled = Boolean(jobs.executor?.enabled !== false && jobs.executor);
+  if (!jobs.planner && !jobs.executor) return "missing";
+  if (plannerEnabled && executorEnabled) return "running";
+  if (!plannerEnabled && !executorEnabled) return "stopped";
+  return "partial";
+}
+
+async function formatBackgroundStatusWithOperations(runtime, jobs, roleWallet = null) {
+  const status = {
+    ok: true,
+    combinedState: combinedBackgroundState(jobs),
+    planner: formatBackgroundJobItem(jobs.planner, "planner"),
+    executor: formatBackgroundJobItem(jobs.executor, "executor"),
+    customStrategy: null,
+  };
   status.customStrategy = await readBackgroundCustomStrategy(runtime, roleWallet);
   return status;
 }
 
-function desiredBackgroundJob({ api, message, enabled = true, intervalMinutes = 30 }) {
-  const normalizedIntervalMinutes = normalizeBackgroundIntervalMinutes(intervalMinutes);
+function desiredBackgroundJob({ api, kind, message, enabled = true, intervalMinutes }) {
+  const spec = backgroundJobSpec(kind);
+  const normalizedIntervalMinutes = normalizeBackgroundIntervalMinutes(intervalMinutes, spec.defaultIntervalMinutes);
   return {
     agentId: resolveDefaultAgentId(api.runtime.config.loadConfig()),
-    name: AGENTBOX_BACKGROUND_JOB_NAME,
-    description: "Agentbox stable background gameplay runner managed by the Agentbox local bridge",
+    name: spec.name,
+    description: spec.description,
     enabled,
     deleteAfterRun: false,
     schedule: {
@@ -875,7 +913,7 @@ function desiredBackgroundJob({ api, message, enabled = true, intervalMinutes = 
       everyMs: normalizedIntervalMinutes * 60 * 1000,
       anchorMs: Date.now(),
     },
-    sessionTarget: AGENTBOX_BACKGROUND_SESSION_TARGET,
+    sessionTarget: spec.sessionTarget,
     wakeMode: "now",
     payload: {
       kind: "agentTurn",
@@ -888,27 +926,27 @@ function desiredBackgroundJob({ api, message, enabled = true, intervalMinutes = 
   };
 }
 
-async function createOrUpdateBackgroundJob(api, message, { enabled = true, intervalMinutes = 30 } = {}) {
+async function createOrUpdateBackgroundJob(api, kind, message, { enabled = true, intervalMinutes } = {}) {
   const cron = resolveCronService(api);
-  const existing = findBackgroundJob(await listCronJobs(api));
-  const desired = desiredBackgroundJob({ api, message, enabled, intervalMinutes });
+  const existing = findBackgroundJob(await listCronJobs(api), kind);
+  const desired = desiredBackgroundJob({ api, kind, message, enabled, intervalMinutes });
   if (cron) {
     if (existing?.id) {
       await cron.update(existing.id, desired);
-      return findBackgroundJob(await listCronJobs(api));
+      return findBackgroundJob(await listCronJobs(api), kind);
     }
     await cron.add(desired);
-    return findBackgroundJob(await listCronJobs(api));
+    return findBackgroundJob(await listCronJobs(api), kind);
   }
   if (existing?.id) {
     await callCronRpc("cron.update", {
       id: existing.id,
       patch: desired,
     });
-    return findBackgroundJob(await listCronJobs(api));
+    return findBackgroundJob(await listCronJobs(api), kind);
   }
   await callCronRpc("cron.add", desired);
-  return findBackgroundJob(await listCronJobs(api));
+  return findBackgroundJob(await listCronJobs(api), kind);
 }
 
 async function setBackgroundJobEnabled(api, jobId, enabled) {
@@ -916,8 +954,7 @@ async function setBackgroundJobEnabled(api, jobId, enabled) {
   if (cron) {
     try {
       await cron.update(jobId, { enabled });
-      const job = findBackgroundJob(await listCronJobs(api));
-      if (job) return job;
+      return;
     } catch (error) {
       api?.logger?.warn?.(
         `agentbox bridge: cron service update failed, falling back to gateway RPC: ${
@@ -930,7 +967,6 @@ async function setBackgroundJobEnabled(api, jobId, enabled) {
     id: jobId,
     patch: { enabled },
   });
-  return findBackgroundJob(await listCronJobs(api));
 }
 
 async function runBackgroundJobNow(api, jobId) {
@@ -1792,10 +1828,10 @@ function createBridgeHandler(api, hub, pairingManager, streamTicketManager, rout
         return true;
       }
       try {
-        const job = findBackgroundJob(await listCronJobs(api));
+        const jobs = findBackgroundJobs(await listCronJobs(api));
         const activeRoleState = readActiveRoleForBackground(runtime);
         const roleWallet = activeRoleState.activeRole?.roleWallet || null;
-        writeJson(res, 200, await formatBackgroundJobStatusWithOperations(runtime, job, roleWallet), origin);
+        writeJson(res, 200, await formatBackgroundStatusWithOperations(runtime, jobs, roleWallet), origin);
       } catch (error) {
         writeJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) }, origin);
       }
@@ -1815,11 +1851,14 @@ function createBridgeHandler(api, hub, pairingManager, streamTicketManager, rout
         return true;
       }
       const customStrategy = sanitizeBackgroundText(body.customStrategy, "");
-      const customCronPrompt = sanitizeCronPromptText(body.customCronPrompt, "");
-      const existingJob = findBackgroundJob(await listCronJobs(api));
-      const intervalMinutes = normalizeBackgroundIntervalMinutes(
-        body.intervalMinutes,
-        backgroundIntervalMinutes(existingJob) || 30
+      const existingJobs = findBackgroundJobs(await listCronJobs(api));
+      const plannerIntervalMinutes = normalizeBackgroundIntervalMinutes(
+        body.plannerIntervalMinutes ?? body.intervalMinutes,
+        backgroundIntervalMinutes(existingJobs.planner) || AGENTBOX_BACKGROUND_PLANNER_DEFAULT_INTERVAL_MINUTES
+      );
+      const executorIntervalMinutes = normalizeBackgroundIntervalMinutes(
+        body.executorIntervalMinutes ?? body.intervalMinutes,
+        backgroundIntervalMinutes(existingJobs.executor) || AGENTBOX_BACKGROUND_EXECUTOR_DEFAULT_INTERVAL_MINUTES
       );
       try {
         const activeRoleState = readActiveRoleForBackground(runtime);
@@ -1829,51 +1868,74 @@ function createBridgeHandler(api, hub, pairingManager, streamTicketManager, rout
           return true;
         }
         await runtime.invoke("agentbox.operations.update_strategy", { role: roleWallet, customStrategy });
-        if (routeName === "background-update-goal" && !existingJob) {
-          writeJson(res, 200, await formatBackgroundJobStatusWithOperations(runtime, null, roleWallet), origin);
+        if (routeName === "background-update-goal") {
+          writeJson(res, 200, await formatBackgroundStatusWithOperations(runtime, existingJobs, roleWallet), origin);
           return true;
         }
-        const message = await buildBackgroundPrompt({
+        const plannerMessage = await buildBackgroundPrompt({
           runtime,
+          kind: "planner",
           language: body.language,
-          intervalMinutes,
-          customCronPrompt,
+          intervalMinutes: plannerIntervalMinutes,
           activeRoleState,
         });
-        const enabled = routeName === "background-start" ? true : existingJob.enabled !== false;
-        const job = await createOrUpdateBackgroundJob(api, message, { enabled, intervalMinutes });
-        if (routeName === "background-start") {
-          if (!job?.id) {
-            writeJson(res, 500, { ok: false, error: "background_job_unavailable" }, origin);
-            return true;
-          }
-          runBackgroundJobNow(api, job.id).catch((error) => {
+        const executorMessage = await buildBackgroundPrompt({
+          runtime,
+          kind: "executor",
+          language: body.language,
+          intervalMinutes: executorIntervalMinutes,
+          activeRoleState,
+        });
+        const plannerJob = await createOrUpdateBackgroundJob(api, "planner", plannerMessage, {
+          enabled: true,
+          intervalMinutes: plannerIntervalMinutes,
+        });
+        const executorJob = await createOrUpdateBackgroundJob(api, "executor", executorMessage, {
+          enabled: true,
+          intervalMinutes: executorIntervalMinutes,
+        });
+        if (!plannerJob?.id || !executorJob?.id) {
+          writeJson(res, 500, { ok: false, error: "background_job_unavailable" }, origin);
+          return true;
+        }
+        runBackgroundJobNow(api, plannerJob.id)
+          .catch((error) => {
             api?.logger?.warn?.(
-              `agentbox bridge: async background run-now failed: ${
+              `agentbox bridge: async planner run-now failed: ${
                 error instanceof Error ? error.message : String(error)
               }`
             );
+          })
+          .finally(() => {
+            runBackgroundJobNow(api, executorJob.id).catch((error) => {
+              api?.logger?.warn?.(
+                `agentbox bridge: async executor run-now failed: ${
+                  error instanceof Error ? error.message : String(error)
+                }`
+              );
+            });
           });
-          writeJson(
-            res,
-            200,
-            await formatBackgroundJobStatusWithOperations(
-              runtime,
-              {
-                ...job,
+        writeJson(
+          res,
+          200,
+          await formatBackgroundStatusWithOperations(
+            runtime,
+            {
+              planner: {
+                ...plannerJob,
                 enabled: true,
-                state: {
-                  ...(job.state ?? {}),
-                  runningAtMs: job.state?.runningAtMs ?? Date.now(),
-                },
+                state: { ...(plannerJob.state ?? {}), runningAtMs: plannerJob.state?.runningAtMs ?? Date.now() },
               },
-              roleWallet
-            ),
-            origin
-          );
-          return true;
-        }
-        writeJson(res, 200, await formatBackgroundJobStatusWithOperations(runtime, job, roleWallet), origin);
+              executor: {
+                ...executorJob,
+                enabled: true,
+                state: { ...(executorJob.state ?? {}), runningAtMs: executorJob.state?.runningAtMs ?? Date.now() },
+              },
+            },
+            roleWallet
+          ),
+          origin
+        );
       } catch (error) {
         writeJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) }, origin);
       }
@@ -1886,15 +1948,14 @@ function createBridgeHandler(api, hub, pairingManager, streamTicketManager, rout
         return true;
       }
       try {
-        const job = findBackgroundJob(await listCronJobs(api));
-        if (!job?.id) {
-          writeJson(res, 404, { ok: false, error: "background_job_missing" }, origin);
-          return true;
+        const jobs = findBackgroundJobs(await listCronJobs(api));
+        for (const job of [jobs.planner, jobs.executor]) {
+          if (job?.id) await setBackgroundJobEnabled(api, job.id, false);
         }
-        const nextJob = await setBackgroundJobEnabled(api, job.id, false);
+        const nextJobs = findBackgroundJobs(await listCronJobs(api));
         const activeRoleState = readActiveRoleForBackground(runtime);
         const roleWallet = activeRoleState.activeRole?.roleWallet || null;
-        writeJson(res, 200, await formatBackgroundJobStatusWithOperations(runtime, nextJob, roleWallet), origin);
+        writeJson(res, 200, await formatBackgroundStatusWithOperations(runtime, nextJobs, roleWallet), origin);
       } catch (error) {
         writeJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) }, origin);
       }

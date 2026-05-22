@@ -28,7 +28,8 @@ INCLUDED_FILES = [
     "runtime/settings.js",
     "hermes_skill/agentbox-hermes-skills/SKILL.md",
     "docs/AGENTBOX_ID_SEMANTICS.md",
-    "docs/HERMES_CRON_PROMPT.md",
+    "docs/HERMES_PLANNER_PROMPT.md",
+    "docs/HERMES_EXECUTOR_PROMPT.md",
     "agentbox_core/deployments.json",
     "agentbox_core/abi/AgentboxConfig.json",
     "agentbox_core/abi/AgentboxEconomy.json",
@@ -192,7 +193,7 @@ def write_manifest(package_dir: Path) -> None:
 def write_embedded_skill_docs(package_dir: Path) -> None:
     docs_dir = package_dir / "hermes_skill" / "agentbox-hermes-skills" / "docs"
     docs_dir.mkdir(parents=True, exist_ok=True)
-    for doc_name in ("AGENTBOX_ID_SEMANTICS.md", "HERMES_CRON_PROMPT.md"):
+    for doc_name in ("AGENTBOX_ID_SEMANTICS.md", "HERMES_PLANNER_PROMPT.md", "HERMES_EXECUTOR_PROMPT.md"):
         shutil.copy2(REPO_ROOT / "docs" / doc_name, docs_dir / doc_name)
 
 

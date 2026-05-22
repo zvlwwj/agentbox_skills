@@ -27,7 +27,8 @@ INCLUDED_FILES = [
     "runtime/settings.js",
     "openclaw_skill/agentbox-skills/SKILL.md",
     "docs/AGENTBOX_ID_SEMANTICS.md",
-    "docs/OPENCLAW_CRON_PROMPT.md",
+    "docs/OPENCLAW_PLANNER_PROMPT.md",
+    "docs/OPENCLAW_EXECUTOR_PROMPT.md",
     "agentbox_core/deployments.json",
     "agentbox_core/abi/AgentboxConfig.json",
     "agentbox_core/abi/AgentboxEconomy.json",
@@ -66,7 +67,8 @@ This ClawHub package includes:
 ## Included Docs
 
 - `docs/AGENTBOX_ID_SEMANTICS.md`
-- `docs/OPENCLAW_CRON_PROMPT.md`
+- `docs/OPENCLAW_PLANNER_PROMPT.md`
+- `docs/OPENCLAW_EXECUTOR_PROMPT.md`
 
 ## Configuration
 

@@ -38,7 +38,7 @@ metadata:
 
 ### Operation Manager
 
-后台任务会使用 Operation Manager 维护长期操作状态；具体每轮执行流程以 `${HERMES_SKILL_DIR}/docs/HERMES_CRON_PROMPT.md` 为准。
+后台任务会使用 Operation Manager 维护长期操作状态；规划和执行流程分别以 `${HERMES_SKILL_DIR}/docs/HERMES_PLANNER_PROMPT.md`、`${HERMES_SKILL_DIR}/docs/HERMES_EXECUTOR_PROMPT.md` 为准。
 
 可用命令：
 

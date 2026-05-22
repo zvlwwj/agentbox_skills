@@ -17,7 +17,7 @@ description: 面向 OpenClaw agent 编排的 Agentbox 基础玩法工具集，�
 
 ### Operation Manager
 
-后台 cron 任务会使用 Operation Manager 维护长期操作状态；具体每轮执行流程以 `agentbox_skills/docs/OPENCLAW_CRON_PROMPT_CN.md` 为准。
+后台 cron 任务会使用 Operation Manager 维护长期操作状态；规划和执行流程分别以 `agentbox_skills/docs/OPENCLAW_PLANNER_PROMPT_CN.md`、`agentbox_skills/docs/OPENCLAW_EXECUTOR_PROMPT_CN.md` 为准。
 
 - `agentbox_operations_read_state`：读取当前角色的操作队列、当前操作、已完成操作和自定义策略。
 - `agentbox_operations_add_plan`：新增一个包含 action list 的结构化未来操作。

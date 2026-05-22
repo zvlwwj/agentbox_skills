@@ -146,22 +146,24 @@ agentbox-hermes bridge uninstall-service
 
 `agentbox-hermes bridge start` remains available as a foreground debugging command. Normal installs should use the LaunchAgent installed by `install_hermes_skills.py`.
 
-## Hermes Background Runs
+## Background Runs
 
-Hermes background automation should attach `agentbox-hermes-skills` and use the Hermes-specific prompt template:
+Agentbox background automation is split into two jobs:
 
-- `agentbox_skills/docs/HERMES_CRON_PROMPT_CN.md`
+- planner: maintains Operation Manager plans and strategy
+- executor: executes safe next actions from Operation Manager
 
-Hermes cron runs are fresh sessions, so long-running execution state must be persisted to:
+OpenClaw uses `OPENCLAW_PLANNER_PROMPT.md` and `OPENCLAW_EXECUTOR_PROMPT.md`.
+Hermes uses `HERMES_PLANNER_PROMPT.md` and `HERMES_EXECUTOR_PROMPT.md`.
 
-- `~/.hermes/agentbox/background_runner_state.json`
+Long-running gameplay state is stored in the Operation Manager files under each agent data directory.
 
 ## Inspect Final Model Prompt
 
 When OpenClaw `cacheTrace` is enabled, you can inspect the latest fully-expanded model input for a session with:
 
 ```bash
-python3 agentbox_skills/scripts/show_openclaw_prompt_trace.py agentbox-background-runner
+python3 agentbox_skills/scripts/show_openclaw_prompt_trace.py agentbox-background-executor
 ```
 
 This script resolves the session by session key, session id, or trailing session label, then prints:
@@ -174,13 +176,13 @@ This script resolves the session by session key, session id, or trailing session
 To get the raw structured result instead of a text report:
 
 ```bash
-python3 agentbox_skills/scripts/show_openclaw_prompt_trace.py agentbox-background-runner --json
+python3 agentbox_skills/scripts/show_openclaw_prompt_trace.py agentbox-background-executor --json
 ```
 
 To write the report directly to a file:
 
 ```bash
 python3 agentbox_skills/scripts/show_openclaw_prompt_trace.py \
-  agentbox-background-runner \
-  --output /tmp/agentbox-background-runner-trace.txt
+  agentbox-background-executor \
+  --output /tmp/agentbox-background-executor-trace.txt
 ```

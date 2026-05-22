@@ -130,6 +130,10 @@ function makeEmptyState(role) {
     completedOperations: [],
     customStrategy: "",
     customStrategyUpdatedAt: null,
+    plannerUpdatedAt: null,
+    executorUpdatedAt: null,
+    lastPlannerResult: null,
+    lastExecutorResult: null,
     updatedAt: now,
   };
 }
@@ -148,6 +152,10 @@ function normalizeState(rawState, role) {
     completedOperations: Array.isArray(state.completedOperations) ? state.completedOperations : [],
     customStrategy: normalizeCustomStrategy(state.customStrategy),
     customStrategyUpdatedAt: state.customStrategyUpdatedAt || null,
+    plannerUpdatedAt: state.plannerUpdatedAt || null,
+    executorUpdatedAt: state.executorUpdatedAt || null,
+    lastPlannerResult: state.lastPlannerResult || null,
+    lastExecutorResult: state.lastExecutorResult || null,
     updatedAt: state.updatedAt || utcNowIso(),
   };
 }

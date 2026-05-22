@@ -22,7 +22,8 @@ BACKGROUND_STATE_PATH = HERMES_AGENTBOX_HOME / "background_runner_state.json"
 LAST_SUMMARY_PATH = HERMES_AGENTBOX_HOME / "last_execution_summary.md"
 SKILL_DOCS = [
     "AGENTBOX_ID_SEMANTICS.md",
-    "HERMES_CRON_PROMPT.md",
+    "HERMES_PLANNER_PROMPT.md",
+    "HERMES_EXECUTOR_PROMPT.md",
 ]
 AGENTBOX_SKILL_NAMES = {
     "agentbox-hermes-skills",

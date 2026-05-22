@@ -29,7 +29,7 @@ cron_interval_seconds: <cron_interval_seconds>
 
 ## Operation Goal Creation Rules
 
-- When planning wait-based actions, account for the cron job interval so the role does not become finishable too early and then sit idle for too long.
+- When planning `wait-based actions`, account for the cron job interval so the role does not become finishable too early and then sit idle for too long.
 - Estimate the chain at about `2 seconds / block`; this run must prefer the `cron_interval_seconds` / `cron_interval_minutes` values provided at the top of this document.
 - Operation goals may be proactive and include multiple duration actions. For example: learning Husbandry from the Rancher can include moving to the Rancher and then learning.
 - finish, mint, and AGC stabilization may be secondary goals; a finishable `finish` has the highest priority among them. Secondary goals must not override the mainline goal. After executing a secondary goal, return to state reading and mainline evaluation instead of stopping immediately.
